@@ -1,0 +1,74 @@
+<%- include('partials/header', { title: 'Admin Dashboard' }) %>
+
+<section class="card">
+  <h1>Avito Bot Admin</h1>
+  <p class="muted">Управление продажей Avito-парсинга: пользователи, тарифы, прокси, подписки, платежи.</p>
+
+  <% if (success) { %>
+    <div class="alert info"><%= success %></div>
+  <% } %>
+  <% if (error) { %>
+    <div class="alert error"><%= error %></div>
+  <% } %>
+</section>
+
+<section class="grid metrics">
+  <article class="metric">
+    <span>Пользователи</span>
+    <strong><%= stats.users_count %></strong>
+  </article>
+  <article class="metric">
+    <span>Активные мониторинги</span>
+    <strong><%= stats.active_monitorings %></strong>
+  </article>
+  <article class="metric">
+    <span>Активные подписки</span>
+    <strong><%= stats.active_subscriptions %></strong>
+  </article>
+  <article class="metric">
+    <span>Выручка</span>
+    <strong><%= stats.payments_total_rub %> ₽</strong>
+  </article>
+</section>
+
+<section class="card">
+  <h2>Быстрая активация подписки</h2>
+  <form class="form-grid" action="<%= adminBase %>/subscriptions/activate" method="post">
+    <input name="telegram_id" type="number" placeholder="Telegram ID пользователя" required />
+    <select name="plan_id" required>
+      <option value="">Выберите тариф</option>
+      <% plans.forEach((plan) => { %>
+        <option value="<%= plan.id %>"><%= plan.name %> · <%= plan.price_rub %> ₽</option>
+      <% }) %>
+    </select>
+    <button type="submit">Активировать</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Активные прокси</h2>
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Название</th>
+          <th>Proxy URL</th>
+          <th>Статус</th>
+        </tr>
+      </thead>
+      <tbody>
+      <% proxies.forEach((proxy) => { %>
+        <tr>
+          <td><%= proxy.id %></td>
+          <td><%= proxy.name %></td>
+          <td><%= proxy.proxy_url %></td>
+          <td><span class="badge <%= proxy.is_active ? 'active' : 'disabled' %>"><%= proxy.is_active ? 'active' : 'disabled' %></span></td>
+        </tr>
+      <% }) %>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<%- include('partials/footer') %>

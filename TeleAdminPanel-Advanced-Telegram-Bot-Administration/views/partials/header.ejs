@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title><%= title %></title>
+  <link rel="stylesheet" href="<%= adminBase %>/style.css" />
+</head>
+<body>
+  <div class="layout">
+    <nav class="nav">
+      <a href="<%= adminBase %>/"            class="<%= currentPage===''            ?'nav-active':'' %>">Dashboard</a>
+      <a href="<%= adminBase %>/plans"       class="<%= currentPage==='plans'       ?'nav-active':'' %>">Тарифы</a>
+      <a href="<%= adminBase %>/proxies"     class="<%= currentPage==='proxies'     ?'nav-active':'' %>">Прокси</a>
+      <a href="<%= adminBase %>/users"       class="<%= currentPage==='users'       ?'nav-active':'' %>">Пользователи</a>
+      <a href="<%= adminBase %>/monitorings" class="<%= currentPage==='monitorings' ?'nav-active':'' %>">Мониторинги</a>
+      <a href="<%= adminBase %>/payments"    class="<%= currentPage==='payments'    ?'nav-active':'' %>">Платежи</a>
+    </nav>

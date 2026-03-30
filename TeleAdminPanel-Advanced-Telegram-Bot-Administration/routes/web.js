@@ -1,0 +1,181 @@
+const express = require('express');
+const api = require('../services/backendApi');
+
+const router = express.Router();
+const ADMIN_BASE_PATH = process.env.ADMIN_BASE_PATH || "/admin";
+
+function toInt(value) {
+  const parsed = Number(value);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+function withAdminBase(path) {
+  const cleanBase = ADMIN_BASE_PATH.endsWith("/") ? ADMIN_BASE_PATH.slice(0, -1) : ADMIN_BASE_PATH;
+  return `${cleanBase}${path}`;
+}
+
+router.get('/', async (req, res) => {
+  try {
+    const [stats, plans, proxies] = await Promise.all([api.getStats(), api.getPlans(), api.getProxies()]);
+    res.render('dashboard', { stats, plans, proxies, error: null, success: req.query.success || null });
+  } catch (error) {
+    res.render('dashboard', {
+      stats: { users_count: 0, active_monitorings: 0, active_subscriptions: 0, payments_total_rub: 0 },
+      plans: [],
+      proxies: [],
+      error: error.message,
+      success: null,
+    });
+  }
+});
+
+router.get('/plans', async (req, res) => {
+  try {
+    const plans = await api.getPlans();
+    res.render('plans', { plans, error: null, success: req.query.success || null });
+  } catch (error) {
+    res.render('plans', { plans: [], error: error.message, success: null });
+  }
+});
+
+router.post('/plans', async (req, res) => {
+  try {
+    await api.createPlan({
+      name: req.body.name,
+      description: req.body.description || null,
+      links_limit: toInt(req.body.links_limit),
+      duration_days: toInt(req.body.duration_days),
+      price_rub: toInt(req.body.price_rub),
+      is_active: req.body.is_active === 'on',
+    });
+    res.redirect(withAdminBase('/plans?success=Тариф+добавлен'));
+  } catch (error) {
+    res.redirect(withAdminBase(`/plans?success=${encodeURIComponent(`Ошибка: ${error.message}`)}`));
+  }
+});
+
+router.post('/plans/:id/update', async (req, res) => {
+  try {
+    await api.updatePlan(req.params.id, {
+      name: req.body.name,
+      description: req.body.description || null,
+      links_limit: toInt(req.body.links_limit),
+      duration_days: toInt(req.body.duration_days),
+      price_rub: toInt(req.body.price_rub),
+      is_active: req.body.is_active === 'on',
+    });
+    res.redirect(withAdminBase('/plans?success=Тариф+обновлен'));
+  } catch (error) {
+    res.redirect(withAdminBase(`/plans?success=${encodeURIComponent(`Ошибка: ${error.message}`)}`));
+  }
+});
+
+router.post('/plans/:id/delete', async (req, res) => {
+  try {
+    await api.deletePlan(req.params.id);
+    res.redirect(withAdminBase('/plans?success=Тариф+удален'));
+  } catch (error) {
+    res.redirect(withAdminBase(`/plans?success=${encodeURIComponent(`Ошибка: ${error.message}`)}`));
+  }
+});
+
+router.get('/proxies', async (req, res) => {
+  try {
+    const proxies = await api.getProxies();
+    res.render('proxies', { proxies, error: null, success: req.query.success || null });
+  } catch (error) {
+    res.render('proxies', { proxies: [], error: error.message, success: null });
+  }
+});
+
+router.post('/proxies', async (req, res) => {
+  try {
+    await api.createProxy({
+      name: req.body.name,
+      proxy_url: req.body.proxy_url,
+      change_ip_url: req.body.change_ip_url || null,
+      is_active: req.body.is_active === 'on',
+    });
+    res.redirect(withAdminBase('/proxies?success=Прокси+добавлен'));
+  } catch (error) {
+    res.redirect(withAdminBase(`/proxies?success=${encodeURIComponent(`Ошибка: ${error.message}`)}`));
+  }
+});
+
+router.post('/proxies/:id/update', async (req, res) => {
+  try {
+    await api.updateProxy(req.params.id, {
+      name: req.body.name,
+      proxy_url: req.body.proxy_url,
+      change_ip_url: req.body.change_ip_url || null,
+      is_active: req.body.is_active === 'on',
+    });
+    res.redirect(withAdminBase('/proxies?success=Прокси+обновлен'));
+  } catch (error) {
+    res.redirect(withAdminBase(`/proxies?success=${encodeURIComponent(`Ошибка: ${error.message}`)}`));
+  }
+});
+
+router.post('/proxies/:id/delete', async (req, res) => {
+  try {
+    await api.deleteProxy(req.params.id);
+    res.redirect(withAdminBase('/proxies?success=Прокси+удален'));
+  } catch (error) {
+    res.redirect(withAdminBase(`/proxies?success=${encodeURIComponent(`Ошибка: ${error.message}`)}`));
+  }
+});
+
+router.get('/users', async (req, res) => {
+  try {
+    const users = await api.getUsers();
+    res.render('users', { users, error: null });
+  } catch (error) {
+    res.render('users', { users: [], error: error.message });
+  }
+});
+
+router.get('/monitorings', async (req, res) => {
+  try {
+    const monitorings = await api.getMonitorings();
+    res.render('monitorings', { monitorings, error: null });
+  } catch (error) {
+    res.render('monitorings', { monitorings: [], error: error.message });
+  }
+});
+
+router.get('/payments', async (req, res) => {
+  try {
+    const [payments, plans] = await Promise.all([api.getPayments(), api.getPlans()]);
+    res.render('payments', { payments, plans, error: null, success: req.query.success || null });
+  } catch (error) {
+    res.render('payments', { payments: [], plans: [], error: error.message, success: null });
+  }
+});
+
+router.post('/payments', async (req, res) => {
+  try {
+    await api.createPayment({
+      telegram_id: toInt(req.body.telegram_id),
+      plan_id: toInt(req.body.plan_id),
+      amount_rub: toInt(req.body.amount_rub),
+      provider: req.body.provider || 'manual',
+    });
+    res.redirect(withAdminBase('/payments?success=Платеж+создан'));
+  } catch (error) {
+    res.redirect(withAdminBase(`/payments?success=${encodeURIComponent(`Ошибка: ${error.message}`)}`));
+  }
+});
+
+router.post('/subscriptions/activate', async (req, res) => {
+  try {
+    await api.activateSubscription({
+      telegram_id: toInt(req.body.telegram_id),
+      plan_id: toInt(req.body.plan_id),
+    });
+    res.redirect(withAdminBase('/?success=Подписка+активирована'));
+  } catch (error) {
+    res.redirect(withAdminBase(`/?success=${encodeURIComponent(`Ошибка: ${error.message}`)}`));
+  }
+});
+
+module.exports = router;

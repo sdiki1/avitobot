@@ -1,0 +1,114 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: avitobot-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-avito_bot}
+      POSTGRES_USER: ${POSTGRES_USER:-avito}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-avito}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-avito} -d ${POSTGRES_DB:-avito_bot}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  miniapp-backend:
+    build:
+      context: ./miniapp-backend
+    container_name: avitobot-backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://avito:avito@db:5432/avito_bot}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-change_me_internal_token}
+      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:-change_me_admin_token}
+      CORS_ORIGINS: "*"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  avito-parser:
+    build:
+      context: .
+      dockerfile: avito-parser-service/Dockerfile
+    container_name: avitobot-parser
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      BACKEND_URL: ${BACKEND_URL:-http://miniapp-backend:8000}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-change_me_internal_token}
+      POLL_INTERVAL_SEC: ${PARSER_POLL_INTERVAL:-45}
+    depends_on:
+      miniapp-backend:
+        condition: service_started
+
+  bot:
+    build:
+      context: ./telegram-bot
+    container_name: avitobot-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      BOT_TOKEN: ${BOT_TOKEN}
+      BACKEND_URL: ${BACKEND_URL:-http://miniapp-backend:8000}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-change_me_internal_token}
+      MINIAPP_PUBLIC_URL: ${MINIAPP_PUBLIC_URL:-http://localhost}
+    depends_on:
+      miniapp-backend:
+        condition: service_started
+
+  miniapp-frontend:
+    build:
+      context: ./miniapp-frontend
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:20-alpine}
+    container_name: avitobot-frontend
+    restart: unless-stopped
+    environment:
+      VITE_API_BASE_URL: ${PUBLIC_BACKEND_URL:-/api}
+    depends_on:
+      miniapp-backend:
+        condition: service_started
+
+  admin-panel:
+    build:
+      context: ./TeleAdminPanel-Advanced-Telegram-Bot-Administration
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:20-alpine}
+    container_name: avitobot-admin
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PORT: ${ADMIN_PANEL_PORT:-3000}
+      BACKEND_URL: ${BACKEND_URL:-http://miniapp-backend:8000}
+      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:-change_me_admin_token}
+      ADMIN_BASE_PATH: /admin
+    depends_on:
+      miniapp-backend:
+        condition: service_started
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: avitobot-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./deploy/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      miniapp-frontend:
+        condition: service_started
+      miniapp-backend:
+        condition: service_started
+      admin-panel:
+        condition: service_started
+
+volumes:
+  db_data:

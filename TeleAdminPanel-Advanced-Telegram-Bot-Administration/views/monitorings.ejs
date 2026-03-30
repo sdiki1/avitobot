@@ -1,0 +1,43 @@
+<%- include('partials/header', { title: 'Мониторинги' }) %>
+
+<section class="card">
+  <h1>Мониторинги Avito</h1>
+  <% if (error) { %>
+    <div class="alert error"><%= error %></div>
+  <% } %>
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>User ID</th>
+          <th>Название / URL</th>
+          <th>Последняя проверка</th>
+          <th>Статус</th>
+        </tr>
+      </thead>
+      <tbody>
+      <% monitorings.forEach((m) => { %>
+        <tr>
+          <td><strong><%= m.id %></strong></td>
+          <td><%= m.user_id %></td>
+          <td>
+            <div class="user-meta">
+              <strong><%= m.title || `Мониторинг #${m.id}` %></strong>
+              <span class="monitoring-url"><%= m.url %></span>
+            </div>
+          </td>
+          <td class="muted"><%= m.last_checked_at || '—' %></td>
+          <td>
+            <span class="badge <%= m.is_active ? 'active' : 'disabled' %>">
+              <%= m.is_active ? 'active' : 'disabled' %>
+            </span>
+          </td>
+        </tr>
+      <% }) %>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<%- include('partials/footer') %>

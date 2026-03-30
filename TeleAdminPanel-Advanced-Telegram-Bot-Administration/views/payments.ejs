@@ -1,0 +1,59 @@
+<%- include('partials/header', { title: 'Платежи' }) %>
+
+<section class="card">
+  <h1>Платежи</h1>
+  <% if (success) { %>
+    <div class="alert info"><%= success %></div>
+  <% } %>
+  <% if (error) { %>
+    <div class="alert error"><%= error %></div>
+  <% } %>
+
+  <h2>Добавить платеж</h2>
+  <form class="form-grid" action="<%= adminBase %>/payments" method="post">
+    <input name="telegram_id" type="number" placeholder="Telegram ID" required />
+    <select name="plan_id" required>
+      <option value="">Тариф</option>
+      <% plans.forEach((plan) => { %>
+        <option value="<%= plan.id %>"><%= plan.name %></option>
+      <% }) %>
+    </select>
+    <input name="amount_rub" type="number" placeholder="Сумма, ₽" required />
+    <input name="provider" placeholder="manual/yookassa/..." value="manual" />
+    <button type="submit">Сохранить платеж</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>История платежей</h2>
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>User ID</th>
+          <th>Plan ID</th>
+          <th>Сумма</th>
+          <th>Статус</th>
+          <th>Провайдер</th>
+          <th>Дата</th>
+        </tr>
+      </thead>
+      <tbody>
+      <% payments.forEach((p) => { %>
+        <tr>
+          <td><%= p.id %></td>
+          <td><%= p.user_id %></td>
+          <td><%= p.plan_id || '-' %></td>
+          <td><%= p.amount_rub %> ₽</td>
+          <td><span class="badge <%= p.status %>"><%= p.status %></span></td>
+          <td><%= p.provider %></td>
+          <td><%= p.created_at %></td>
+        </tr>
+      <% }) %>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<%- include('partials/footer') %>

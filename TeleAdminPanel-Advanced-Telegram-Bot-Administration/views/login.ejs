@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Вход — Avito Bot Admin</title>
+  <link rel="stylesheet" href="<%= adminBase %>/style.css" />
+</head>
+<body>
+  <div class="login-page">
+    <div class="login-box">
+      <div class="login-logo">
+        <h1>Avito Bot</h1>
+        <p>Панель администратора</p>
+      </div>
+      <div class="card">
+        <% if (typeof error !== 'undefined' && error) { %>
+          <div class="alert error" style="margin-bottom:14px"><%= error %></div>
+        <% } %>
+        <form class="stack" action="<%= adminBase %>/login" method="post">
+          <input type="text" name="username" placeholder="Имя пользователя" required autocomplete="username" />
+          <input type="password" name="password" placeholder="Пароль" required autocomplete="current-password" />
+          <button type="submit">Войти</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

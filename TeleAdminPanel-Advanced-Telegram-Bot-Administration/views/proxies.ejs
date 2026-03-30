@@ -1,0 +1,69 @@
+<%- include('partials/header', { title: 'Прокси' }) %>
+
+<section class="card">
+  <h1>Прокси</h1>
+  <p class="muted">Добавление/включение прокси для Avito-парсера.</p>
+
+  <% if (success) { %>
+    <div class="alert info"><%= success %></div>
+  <% } %>
+  <% if (error) { %>
+    <div class="alert error"><%= error %></div>
+  <% } %>
+
+  <h2>Добавить прокси</h2>
+  <form class="form-grid" action="<%= adminBase %>/proxies" method="post">
+    <input name="name" placeholder="proxy-main-1" required />
+    <input name="proxy_url" placeholder="http://user:pass@host:port" required />
+    <input name="change_ip_url" placeholder="URL смены IP (опционально)" />
+    <label>
+      <input type="checkbox" name="is_active" checked /> Активен
+    </label>
+    <button type="submit">Добавить</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Список прокси</h2>
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Прокси</th>
+          <th>Статус</th>
+          <th>Действия</th>
+        </tr>
+      </thead>
+      <tbody>
+      <% proxies.forEach((proxy) => { %>
+        <tr>
+          <td><%= proxy.id %></td>
+          <td>
+            <strong><%= proxy.name %></strong><br />
+            <span class="muted"><%= proxy.proxy_url %></span><br />
+            <span class="muted"><%= proxy.change_ip_url || '-' %></span>
+          </td>
+          <td><span class="badge <%= proxy.is_active ? 'active' : 'disabled' %>"><%= proxy.is_active ? 'active' : 'disabled' %></span></td>
+          <td>
+            <form class="form-grid two" action="<%= adminBase %>/proxies/<%= proxy.id %>/update" method="post">
+              <input name="name" value="<%= proxy.name %>" required />
+              <input name="proxy_url" value="<%= proxy.proxy_url %>" required />
+              <input name="change_ip_url" value="<%= proxy.change_ip_url || '' %>" />
+              <label>
+                <input type="checkbox" name="is_active" <%= proxy.is_active ? 'checked' : '' %> /> Активен
+              </label>
+              <button type="submit">Сохранить</button>
+            </form>
+            <form action="<%= adminBase %>/proxies/<%= proxy.id %>/delete" method="post">
+              <button class="danger" type="submit">Удалить</button>
+            </form>
+          </td>
+        </tr>
+      <% }) %>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<%- include('partials/footer') %>

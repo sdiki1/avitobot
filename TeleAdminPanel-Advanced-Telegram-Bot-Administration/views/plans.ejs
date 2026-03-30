@@ -1,0 +1,75 @@
+<%- include('partials/header', { title: 'Тарифы' }) %>
+
+<section class="card">
+  <h1>Тарифы</h1>
+  <p class="muted">Здесь меняется стоимость/лимиты и добавляются кастомные тарифы.</p>
+
+  <% if (success) { %>
+    <div class="alert info"><%= success %></div>
+  <% } %>
+  <% if (error) { %>
+    <div class="alert error"><%= error %></div>
+  <% } %>
+
+  <h2>Новый тариф</h2>
+  <form class="form-grid" action="<%= adminBase %>/plans" method="post">
+    <input name="name" placeholder="Название (напр. 5 ссылок / 30 дней)" required />
+    <input name="links_limit" type="number" placeholder="Лимит ссылок" required />
+    <input name="duration_days" type="number" placeholder="Дней" required />
+    <input name="price_rub" type="number" placeholder="Цена (₽)" required />
+    <input name="description" placeholder="Описание" />
+    <label>
+      <input type="checkbox" name="is_active" checked /> Активен
+    </label>
+    <button type="submit">Добавить тариф</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Список тарифов</h2>
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Параметры</th>
+          <th>Цена</th>
+          <th>Редактирование</th>
+        </tr>
+      </thead>
+      <tbody>
+      <% plans.forEach((plan) => { %>
+        <tr>
+          <td><%= plan.id %></td>
+          <td>
+            <strong><%= plan.name %></strong><br />
+            <span class="muted"><%= plan.links_limit %> ссылок · <%= plan.duration_days %> дней</span>
+            <span class="badge <%= plan.is_active ? 'active' : 'disabled' %>"><%= plan.is_active ? 'active' : 'disabled' %></span>
+          </td>
+          <td><%= plan.price_rub %> ₽</td>
+          <td>
+            <form class="form-grid two" action="<%= adminBase %>/plans/<%= plan.id %>/update" method="post">
+              <input name="name" value="<%= plan.name %>" required />
+              <input name="description" value="<%= plan.description || '' %>" placeholder="Описание" />
+              <input name="links_limit" type="number" value="<%= plan.links_limit %>" required />
+              <input name="duration_days" type="number" value="<%= plan.duration_days %>" required />
+              <input name="price_rub" type="number" value="<%= plan.price_rub %>" required />
+              <label>
+                <input type="checkbox" name="is_active" <%= plan.is_active ? 'checked' : '' %> /> Активен
+              </label>
+              <div class="actions">
+                <button type="submit">Сохранить</button>
+              </div>
+            </form>
+            <form action="<%= adminBase %>/plans/<%= plan.id %>/delete" method="post">
+              <button class="danger" type="submit">Удалить</button>
+            </form>
+          </td>
+        </tr>
+      <% }) %>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<%- include('partials/footer') %>

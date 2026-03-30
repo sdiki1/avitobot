@@ -1,0 +1,43 @@
+<%- include('partials/header', { title: 'Пользователи' }) %>
+
+<section class="card">
+  <h1>Пользователи</h1>
+  <% if (error) { %>
+    <div class="alert error"><%= error %></div>
+  <% } %>
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Telegram ID</th>
+          <th>Имя</th>
+          <th>Ссылок</th>
+          <th>Зарегистрирован</th>
+        </tr>
+      </thead>
+      <tbody>
+      <% users.forEach((user) => { %>
+        <tr>
+          <td><strong><%= user.id %></strong></td>
+          <td><%= user.telegram_id %></td>
+          <td>
+            <div class="user-meta">
+              <strong><%= user.full_name || user.username || '—' %></strong>
+              <% if (user.username) { %><small>@<%= user.username %></small><% } %>
+            </div>
+          </td>
+          <td>
+            <span class="badge <%= user.active_links > 0 ? 'active' : 'disabled' %>">
+              <%= user.active_links %>
+            </span>
+          </td>
+          <td class="muted"><%= user.created_at %></td>
+        </tr>
+      <% }) %>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<%- include('partials/footer') %>

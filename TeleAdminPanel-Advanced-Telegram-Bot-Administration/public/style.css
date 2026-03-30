@@ -1,0 +1,255 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap');
+
+:root {
+  --bg: #f6f4ef;
+  --card: #ffffff;
+  --text: #1f2937;
+  --muted: #6b7280;
+  --line: #e5e7eb;
+  --accent: #0f766e;
+  --danger: #be123c;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: 'Space Grotesk', sans-serif;
+  color: var(--text);
+  background:
+    radial-gradient(circle at top right, rgba(15, 118, 110, 0.12), transparent 35%),
+    linear-gradient(180deg, #f8fafc 0%, var(--bg) 100%);
+}
+
+.layout {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 20px;
+  display: grid;
+  gap: 16px;
+}
+
+.nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 10px;
+}
+
+.nav a {
+  text-decoration: none;
+  color: var(--text);
+  font-weight: 700;
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
+.nav a:hover {
+  background: rgba(15, 118, 110, 0.08);
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 16px;
+}
+
+h1, h2 {
+  margin: 0 0 12px;
+}
+
+h1 {
+  font-size: 28px;
+}
+
+h2 {
+  font-size: 22px;
+}
+
+.grid {
+  display: grid;
+  gap: 16px;
+}
+
+.grid.metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.metric {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 12px;
+  background: #fff;
+}
+
+.metric span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.metric strong {
+  display: block;
+  font-size: 24px;
+  margin-top: 8px;
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table th,
+.table td {
+  text-align: left;
+  padding: 10px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+
+.table th {
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.form-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.form-grid.two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+input,
+textarea,
+button {
+  font: inherit;
+}
+
+input,
+textarea,
+select {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 9px 10px;
+  background: #fff;
+}
+
+button {
+  border: 0;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #0f766e, #0ea5a4);
+  color: #fff;
+  padding: 10px 12px;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+button.danger {
+  background: linear-gradient(135deg, #be123c, #e11d48);
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+}
+
+.alert {
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 14px;
+}
+
+.alert.info {
+  background: #ecfeff;
+  border: 1px solid #a5f3fc;
+}
+
+.alert.error {
+  background: #fff1f2;
+  border: 1px solid #fecdd3;
+  color: var(--danger);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+@media (max-width: 900px) {
+  .grid.metrics,
+  .form-grid,
+  .form-grid.two {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Active nav */
+.nav a.nav-active { background: var(--accent); color: #fff; }
+
+/* Stack util */
+.stack { display: flex; flex-direction: column; gap: 10px; }
+
+/* Status badges */
+.badge {
+  display: inline-block; font-size: 11px; font-weight: 700;
+  letter-spacing: 0.06em; text-transform: uppercase;
+  padding: 3px 9px; border-radius: 999px; white-space: nowrap;
+}
+.badge.active   { background: #d1fae5; color: #065f46; border: 1px solid #6ee7b7; }
+.badge.disabled { background: #f3f4f6; color: #6b7280; border: 1px solid #d1d5db; }
+.badge.completed,
+.badge.paid     { background: #d1fae5; color: #065f46; border: 1px solid #6ee7b7; }
+.badge.pending  { background: #fef9c3; color: #854d0e; border: 1px solid #fde047; }
+.badge.failed   { background: #ffe4e6; color: #9f1239; border: 1px solid #fecdd3; }
+
+/* Table row hover */
+.table tbody tr { transition: background 0.12s ease; }
+.table tbody tr:hover { background: rgba(15, 118, 110, 0.04); }
+
+/* Metric accent strip */
+.metric { position: relative; overflow: hidden; }
+.metric::before {
+  content: ''; position: absolute; top: 0; left: 0;
+  width: 3px; height: 100%;
+  background: linear-gradient(180deg, var(--accent), #0ea5a4);
+  border-radius: 3px 0 0 3px;
+}
+
+/* Input focus */
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12);
+}
+
+/* Login page */
+.login-page { min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+.login-box  { width: 100%; max-width: 380px; }
+.login-logo { text-align: center; margin-bottom: 24px; }
+.login-logo h1 { font-size: 24px; margin: 0; color: var(--accent); }
+.login-logo p  { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
+
+/* Richer table cells */
+.user-meta strong { display: block; line-height: 1.3; }
+.user-meta small  { color: var(--muted); font-size: 12px; }
+.monitoring-url {
+  display: block; max-width: 280px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  color: var(--muted); font-size: 12px; margin-top: 2px;
+}
