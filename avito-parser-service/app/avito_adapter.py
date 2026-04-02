@@ -6,8 +6,10 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from bs4 import BeautifulSoup
+from loguru import logger
 from pydantic import ValidationError
 import requests
 
@@ -23,6 +25,34 @@ from models import ItemsResponse, Item  # type: ignore  # noqa: E402
 
 
 class AvitoAdapter:
+    @staticmethod
+    def _normalize_proxy_url(proxy_url: str) -> str:
+        raw = proxy_url.strip()
+        if not raw:
+            return raw
+
+        if "://" in raw:
+            return raw
+
+        # Common proxy format from providers: host:port:username:password
+        parts = raw.split(":")
+        if len(parts) >= 4 and parts[1].isdigit():
+            host = parts[0]
+            port = parts[1]
+            username = parts[2]
+            password = ":".join(parts[3:])
+            return f"http://{quote(username, safe='')}:{quote(password, safe='')}@{host}:{port}"
+
+        # host:port without auth
+        if len(parts) == 2 and parts[1].isdigit():
+            return f"http://{raw}"
+
+        # user:pass@host:port without explicit scheme
+        if "@" in raw:
+            return f"http://{raw}"
+
+        return raw
+
     @staticmethod
     def find_json_on_page(html_code: str) -> dict[str, Any]:
         """Логика взята из parser_avito/parser_cls.py::find_json_on_page."""
@@ -53,10 +83,24 @@ class AvitoAdapter:
 
         proxies = None
         if proxy_url:
-            proxies = {"http": proxy_url, "https": proxy_url}
+            normalized_proxy = self._normalize_proxy_url(str(proxy_url))
+            proxies = {"http": normalized_proxy, "https": normalized_proxy}
 
-        response = requests.get(url, headers=HEADERS, timeout=25, proxies=proxies)
-        response.raise_for_status()
+        try:
+            response = requests.get(url, headers=HEADERS, timeout=25, proxies=proxies)
+            response.raise_for_status()
+        except requests.exceptions.ProxyError as exc:
+            if not proxies:
+                raise
+            logger.warning(f"Proxy failed for url={url}: {exc}. Retrying without proxy.")
+            response = requests.get(url, headers=HEADERS, timeout=25)
+            response.raise_for_status()
+        except requests.exceptions.InvalidSchema as exc:
+            if not proxies or "SOCKS support" not in str(exc):
+                raise
+            logger.warning(f"SOCKS proxy is configured but dependencies are missing: {exc}. Retrying without proxy.")
+            response = requests.get(url, headers=HEADERS, timeout=25)
+            response.raise_for_status()
 
         data = self.find_json_on_page(response.text)
         catalog = data.get("catalog") or {}
