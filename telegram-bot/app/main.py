@@ -120,7 +120,7 @@ async def cmd_start(message: Message) -> None:
         "Команды:\n"
         "/plans - тарифы\n"
         "/my_links - мои ссылки\n"
-        "/add_link <url> - добавить ссылку\n"
+        "/add_link &lt;url&gt; - добавить ссылку\n"
         "/miniapp - открыть miniapp"
     )
     await message.answer(text, reply_markup=miniapp_keyboard(tg_user.id))
