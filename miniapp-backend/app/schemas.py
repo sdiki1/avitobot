@@ -14,9 +14,47 @@ class UserResponse(BaseModel):
     telegram_id: int
     username: str | None = None
     full_name: str | None = None
+    referral_code: str | None = None
+    referral_balance_rub: int = 0
 
     class Config:
         from_attributes = True
+
+
+class TelegramBotBase(BaseModel):
+    name: str = Field(min_length=2, max_length=255)
+    is_active: bool = True
+
+
+class TelegramBotCreate(TelegramBotBase):
+    bot_token: str = Field(min_length=10, max_length=255)
+
+
+class TelegramBotUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=2, max_length=255)
+    bot_token: str | None = Field(default=None, min_length=10, max_length=255)
+    telegram_bot_id: int | None = None
+    bot_username: str | None = None
+    is_active: bool | None = None
+
+
+class TelegramBotResponse(TelegramBotBase):
+    id: int
+    telegram_bot_id: int | None = None
+    bot_username: str | None = None
+    bot_link: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class BotReference(BaseModel):
+    id: int
+    name: str
+    bot_username: str | None = None
+    bot_link: str | None = None
 
 
 class TariffPlanBase(BaseModel):
@@ -50,13 +88,19 @@ class TariffPlanResponse(TariffPlanBase):
 
 class MonitoringCreate(BaseModel):
     telegram_id: int
-    url: str
+    url: str | None = None
     title: str | None = None
     keywords_white: list[str] = Field(default_factory=list)
     keywords_black: list[str] = Field(default_factory=list)
     min_price: int | None = None
     max_price: int | None = None
     geo: str | None = None
+
+
+class MonitoringPurchaseRequest(BaseModel):
+    telegram_id: int
+    title: str | None = None
+    url: str | None = None
 
 
 class MonitoringResponse(BaseModel):
@@ -69,7 +113,9 @@ class MonitoringResponse(BaseModel):
     max_price: int | None = None
     geo: str | None = None
     is_active: bool
+    link_configured: bool
     last_checked_at: datetime | None = None
+    bot: BotReference | None = None
 
 
 class MonitoringItemResponse(BaseModel):
@@ -134,6 +180,19 @@ class ActivateSubscriptionRequest(BaseModel):
     plan_id: int
 
 
+class PurchaseSubscriptionRequest(BaseModel):
+    telegram_id: int
+    plan_id: int
+
+
+class PurchaseSubscriptionResponse(BaseModel):
+    ok: bool
+    subscription_id: int
+    user_id: int
+    plan_id: int
+    ends_at: datetime
+
+
 class InternalParsedItem(BaseModel):
     avito_ad_id: str
     title: str
@@ -158,4 +217,34 @@ class NotificationResponse(BaseModel):
 class InternalNotificationResponse(BaseModel):
     id: int
     telegram_id: int
+    bot_id: int | None = None
+    telegram_bot_id: int | None = None
+    monitoring_id: int
     message: str
+
+
+class InternalBotConfigResponse(BaseModel):
+    id: int
+    name: str
+    bot_token: str
+    telegram_bot_id: int | None = None
+    bot_username: str | None = None
+
+
+class InternalBotLookupResponse(BaseModel):
+    monitoring_id: int
+    title: str | None = None
+    url: str
+    is_active: bool
+    link_configured: bool
+
+
+class InternalBotSyncRequest(BaseModel):
+    telegram_bot_id: int
+    bot_username: str | None = None
+
+
+class InternalBotCommandRequest(BaseModel):
+    telegram_id: int
+    bot_id: int
+    url: str | None = None

@@ -36,6 +36,12 @@ exports.deleteProxy = (id) => request(`/proxies/${id}`, { method: 'DELETE' });
 
 exports.getUsers = () => request('/users');
 exports.getMonitorings = () => request('/monitorings');
+
+exports.getBots = () => request('/bots');
+exports.createBot = (payload) => request('/bots', { method: 'POST', body: JSON.stringify(payload) });
+exports.updateBot = (id, payload) => request(`/bots/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+exports.deleteBot = (id) => request(`/bots/${id}`, { method: 'DELETE' });
+
 exports.getPayments = () => request('/payments');
 exports.createPayment = (payload) => request('/payments', { method: 'POST', body: JSON.stringify(payload) });
 exports.activateSubscription = (payload) =>

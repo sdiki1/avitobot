@@ -32,6 +32,16 @@ export async function createMonitoring(payload) {
   return data
 }
 
+export async function purchaseMonitoring(payload) {
+  const { data } = await client.post('/monitorings/purchase', payload)
+  return data
+}
+
+export async function purchaseSubscription(payload) {
+  const { data } = await client.post('/subscriptions/purchase', payload)
+  return data
+}
+
 export async function deleteMonitoring(telegramId, monitoringId) {
   const { data } = await client.delete(`/monitorings/${monitoringId}`, {
     params: { telegram_id: telegramId },

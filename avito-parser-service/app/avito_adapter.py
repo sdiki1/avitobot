@@ -130,6 +130,7 @@ class AvitoAdapter:
             ad_id = str(ad.id)
             ad_url = f"https://www.avito.ru{ad.urlPath}" if ad.urlPath else url
             price = ad.priceDetailed.value if ad.priceDetailed and ad.priceDetailed.value is not None else None
+            published_at = self._to_utc(ad.sortTimeStamp)
 
             location = None
             if ad.geo and ad.geo.formattedAddress:
@@ -144,7 +145,7 @@ class AvitoAdapter:
                     "url": ad_url,
                     "price_rub": price,
                     "location": location,
-                    "published_at": self._to_utc(ad.sortTimeStamp),
+                    "published_at": published_at.isoformat() if published_at else None,
                     "raw_json": ad.model_dump(mode="json"),
                 }
             )

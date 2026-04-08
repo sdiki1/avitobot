@@ -1,8 +1,9 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.database import Base, engine
-from app.models import TariffPlan
+from app.models import TariffPlan, TelegramBot
 
 
 DEFAULT_PLANS = [
@@ -32,6 +33,25 @@ DEFAULT_PLANS = [
 
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
+    with engine.begin() as conn:
+        conn.exec_driver_sql("ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_code VARCHAR(64)")
+        conn.exec_driver_sql("ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_balance_rub INTEGER DEFAULT 0")
+        conn.exec_driver_sql("CREATE UNIQUE INDEX IF NOT EXISTS uq_users_referral_code ON users (referral_code)")
+        conn.exec_driver_sql("UPDATE users SET referral_code = 'ref_' || telegram_id::text WHERE referral_code IS NULL")
+        conn.exec_driver_sql("UPDATE users SET referral_balance_rub = 0 WHERE referral_balance_rub IS NULL")
+
+        conn.exec_driver_sql("ALTER TABLE monitorings ADD COLUMN IF NOT EXISTS bot_id INTEGER")
+        conn.exec_driver_sql("ALTER TABLE monitorings ADD COLUMN IF NOT EXISTS link_configured BOOLEAN DEFAULT FALSE")
+        conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_monitorings_bot_id ON monitorings (bot_id)")
+        conn.exec_driver_sql(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_monitorings_user_bot "
+            "ON monitorings (user_id, bot_id) WHERE bot_id IS NOT NULL"
+        )
+        conn.exec_driver_sql(
+            "UPDATE monitorings SET link_configured = TRUE "
+            "WHERE link_configured IS NOT TRUE AND NULLIF(TRIM(url), '') IS NOT NULL"
+        )
+        conn.exec_driver_sql("UPDATE monitorings SET link_configured = FALSE WHERE link_configured IS NULL")
 
 
 def seed_default_plans(db: Session) -> None:
@@ -40,4 +60,16 @@ def seed_default_plans(db: Session) -> None:
         if existing:
             continue
         db.add(TariffPlan(**plan))
+
+    default_token = (settings.default_bot_token or "").strip()
+    if default_token and default_token != "change_me_telegram_bot_token":
+        existing_bot = db.scalar(select(TelegramBot).where(TelegramBot.bot_token == default_token))
+        if not existing_bot:
+            db.add(
+                TelegramBot(
+                    name=settings.default_bot_name,
+                    bot_token=default_token,
+                    is_active=True,
+                )
+            )
     db.commit()

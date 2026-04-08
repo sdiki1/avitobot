@@ -29,6 +29,10 @@
     <span>Выручка</span>
     <strong><%= stats.payments_total_rub %> ₽</strong>
   </article>
+  <article class="metric">
+    <span>Активные боты</span>
+    <strong><%= stats.active_bots %></strong>
+  </article>
 </section>
 
 <section class="card">
@@ -43,6 +47,32 @@
     </select>
     <button type="submit">Активировать</button>
   </form>
+</section>
+
+<section class="card">
+  <h2>Подключенные боты</h2>
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Имя</th>
+          <th>Username</th>
+          <th>Статус</th>
+        </tr>
+      </thead>
+      <tbody>
+      <% bots.forEach((bot) => { %>
+        <tr>
+          <td><%= bot.id %></td>
+          <td><%= bot.name %></td>
+          <td><%= bot.bot_username ? `@${bot.bot_username}` : '—' %></td>
+          <td><span class="badge <%= bot.is_active ? 'active' : 'disabled' %>"><%= bot.is_active ? 'active' : 'disabled' %></span></td>
+        </tr>
+      <% }) %>
+      </tbody>
+    </table>
+  </div>
 </section>
 
 <section class="card">

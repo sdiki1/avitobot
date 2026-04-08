@@ -3,11 +3,24 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import Select, and_, select
 from sqlalchemy.orm import Session
 
-from app.models import User, UserSubscription
+from app.models import Monitoring, TariffPlan, TelegramBot, User, UserSubscription
 
 
 def now_utc() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def generate_referral_code(telegram_id: int) -> str:
+    return f"ref_{telegram_id}"
+
+
+def ensure_user_referral_code(db: Session, user: User) -> User:
+    if user.referral_code:
+        return user
+    user.referral_code = generate_referral_code(user.telegram_id)
+    db.commit()
+    db.refresh(user)
+    return user
 
 
 def get_or_create_user(db: Session, telegram_id: int, username: str | None, full_name: str | None) -> User:
@@ -17,11 +30,18 @@ def get_or_create_user(db: Session, telegram_id: int, username: str | None, full
             user.username = username
         if full_name is not None:
             user.full_name = full_name
+        if not user.referral_code:
+            user.referral_code = generate_referral_code(telegram_id)
         db.commit()
         db.refresh(user)
         return user
 
-    user = User(telegram_id=telegram_id, username=username, full_name=full_name)
+    user = User(
+        telegram_id=telegram_id,
+        username=username,
+        full_name=full_name,
+        referral_code=generate_referral_code(telegram_id),
+    )
     db.add(user)
     db.commit()
     db.refresh(user)
@@ -36,6 +56,44 @@ def get_active_subscription_query(user_id: int) -> Select[tuple[UserSubscription
             UserSubscription.ends_at > now_utc(),
         )
     ).order_by(UserSubscription.ends_at.desc())
+
+
+def activate_user_subscription(db: Session, user_id: int, plan: TariffPlan) -> UserSubscription:
+    active_sub = db.scalar(get_active_subscription_query(user_id))
+    if active_sub:
+        active_sub.status = "expired"
+
+    started = now_utc()
+    new_sub = UserSubscription(
+        user_id=user_id,
+        plan_id=plan.id,
+        status="active",
+        amount_paid=plan.price_rub,
+        started_at=started,
+        ends_at=add_days(started, plan.duration_days),
+    )
+    db.add(new_sub)
+    db.commit()
+    db.refresh(new_sub)
+    return new_sub
+
+
+def get_available_bot_for_user(db: Session, user_id: int) -> TelegramBot | None:
+    bots = db.scalars(select(TelegramBot).where(TelegramBot.is_active.is_(True)).order_by(TelegramBot.id.asc())).all()
+    if not bots:
+        return None
+
+    used_bot_ids = {
+        bot_id
+        for bot_id in db.scalars(
+            select(Monitoring.bot_id).where(and_(Monitoring.user_id == user_id, Monitoring.bot_id.is_not(None)))
+        ).all()
+        if bot_id is not None
+    }
+    for bot in bots:
+        if bot.id not in used_bot_ids:
+            return bot
+    return None
 
 
 def seconds_to_human(delta_seconds: int) -> str:

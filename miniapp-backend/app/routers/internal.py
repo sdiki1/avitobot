@@ -1,23 +1,94 @@
-from datetime import datetime
-
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import and_, desc, func, select
+from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import Monitoring, MonitoringItem, Notification, ProxyConfig, User, UserSubscription
-from app.schemas import InternalNotificationResponse, InternalScanPayload
+from app.models import Monitoring, MonitoringItem, Notification, ProxyConfig, TelegramBot, User, UserSubscription
+from app.schemas import (
+    InternalBotCommandRequest,
+    InternalBotConfigResponse,
+    InternalBotLookupResponse,
+    InternalBotSyncRequest,
+    InternalNotificationResponse,
+    InternalScanPayload,
+)
 from app.services.auth import require_internal_token
-from app.services.helpers import format_new_item_message, now_utc
+from app.services.helpers import format_new_item_message, get_active_subscription_query, now_utc
 
 router = APIRouter(prefix="/internal", tags=["internal"], dependencies=[Depends(require_internal_token)])
+
+
+def _to_bot_lookup_schema(monitoring: Monitoring) -> InternalBotLookupResponse:
+    return InternalBotLookupResponse(
+        monitoring_id=monitoring.id,
+        title=monitoring.title,
+        url=monitoring.url,
+        is_active=monitoring.is_active,
+        link_configured=monitoring.link_configured,
+    )
+
+
+def _resolve_user_monitoring(db: Session, telegram_id: int, bot_id: int) -> Monitoring:
+    user = db.scalar(select(User).where(User.telegram_id == telegram_id))
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    monitoring = db.scalar(
+        select(Monitoring)
+        .where(and_(Monitoring.user_id == user.id, Monitoring.bot_id == bot_id))
+        .order_by(Monitoring.id.desc())
+    )
+    if not monitoring:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Для этого бота у пользователя нет купленного мониторинга",
+        )
+    return monitoring
+
+
+def _require_active_subscription(db: Session, user_id: int) -> UserSubscription:
+    active_sub = db.scalar(get_active_subscription_query(user_id))
+    if not active_sub:
+        raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail="Нет активной подписки")
+    return active_sub
+
+
+@router.get("/bots/active", response_model=list[InternalBotConfigResponse])
+def active_bots(db: Session = Depends(get_db)) -> list[InternalBotConfigResponse]:
+    bots = db.scalars(select(TelegramBot).where(TelegramBot.is_active.is_(True)).order_by(TelegramBot.id.asc())).all()
+    return [
+        InternalBotConfigResponse(
+            id=bot.id,
+            name=bot.name,
+            bot_token=bot.bot_token,
+            telegram_bot_id=bot.telegram_bot_id,
+            bot_username=bot.bot_username,
+        )
+        for bot in bots
+    ]
+
+
+@router.post("/bots/{bot_id}/sync")
+def sync_bot(bot_id: int, payload: InternalBotSyncRequest, db: Session = Depends(get_db)) -> dict:
+    bot = db.get(TelegramBot, bot_id)
+    if not bot:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bot not found")
+    bot.telegram_bot_id = payload.telegram_bot_id
+    bot.bot_username = payload.bot_username.lstrip("@") if payload.bot_username else None
+    db.commit()
+    return {"ok": True}
 
 
 @router.get("/monitorings/active")
 def active_monitorings(db: Session = Depends(get_db)) -> list[dict]:
     monitorings = db.scalars(
         select(Monitoring)
-        .where(Monitoring.is_active.is_(True))
+        .where(
+            and_(
+                Monitoring.is_active.is_(True),
+                Monitoring.link_configured.is_(True),
+            )
+        )
         .order_by(Monitoring.id.asc())
     ).all()
     proxies = db.scalars(select(ProxyConfig).where(ProxyConfig.is_active.is_(True)).order_by(ProxyConfig.id.asc())).all()
@@ -114,6 +185,53 @@ def save_scan_result(monitoring_id: int, payload: InternalScanPayload, db: Sessi
     return {"ok": True, "created_items": created, "updated_items": touched}
 
 
+@router.get("/bot-monitoring/current", response_model=InternalBotLookupResponse)
+def bot_current_monitoring(
+    telegram_id: int = Query(...),
+    bot_id: int = Query(...),
+    db: Session = Depends(get_db),
+) -> InternalBotLookupResponse:
+    monitoring = _resolve_user_monitoring(db, telegram_id=telegram_id, bot_id=bot_id)
+    return _to_bot_lookup_schema(monitoring)
+
+
+@router.post("/bot-monitoring/start", response_model=InternalBotLookupResponse)
+def bot_start_monitoring(payload: InternalBotCommandRequest, db: Session = Depends(get_db)) -> InternalBotLookupResponse:
+    monitoring = _resolve_user_monitoring(db, telegram_id=payload.telegram_id, bot_id=payload.bot_id)
+    _require_active_subscription(db, monitoring.user_id)
+    if not monitoring.link_configured:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Сначала задайте ссылку командой /change_link <url>",
+        )
+    monitoring.is_active = True
+    db.commit()
+    db.refresh(monitoring)
+    return _to_bot_lookup_schema(monitoring)
+
+
+@router.post("/bot-monitoring/stop", response_model=InternalBotLookupResponse)
+def bot_stop_monitoring(payload: InternalBotCommandRequest, db: Session = Depends(get_db)) -> InternalBotLookupResponse:
+    monitoring = _resolve_user_monitoring(db, telegram_id=payload.telegram_id, bot_id=payload.bot_id)
+    monitoring.is_active = False
+    db.commit()
+    db.refresh(monitoring)
+    return _to_bot_lookup_schema(monitoring)
+
+
+@router.post("/bot-monitoring/change-link", response_model=InternalBotLookupResponse)
+def bot_change_link(payload: InternalBotCommandRequest, db: Session = Depends(get_db)) -> InternalBotLookupResponse:
+    monitoring = _resolve_user_monitoring(db, telegram_id=payload.telegram_id, bot_id=payload.bot_id)
+    cleaned_url = (payload.url or "").strip()
+    if not cleaned_url:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="URL обязателен")
+    monitoring.url = cleaned_url
+    monitoring.link_configured = True
+    db.commit()
+    db.refresh(monitoring)
+    return _to_bot_lookup_schema(monitoring)
+
+
 @router.get("/notifications/pending", response_model=list[InternalNotificationResponse])
 def pending_notifications(
     limit: int = Query(default=100, ge=1, le=500),
@@ -129,10 +247,21 @@ def pending_notifications(
     out = []
     for n in notifications:
         user = db.get(User, n.user_id)
+        monitoring = db.get(Monitoring, n.monitoring_id)
         if not user:
             continue
+        if not monitoring or monitoring.bot_id is None:
+            continue
+        bot = db.get(TelegramBot, monitoring.bot_id)
         out.append(
-            InternalNotificationResponse(id=n.id, telegram_id=user.telegram_id, message=n.message)
+            InternalNotificationResponse(
+                id=n.id,
+                telegram_id=user.telegram_id,
+                bot_id=monitoring.bot_id,
+                telegram_bot_id=bot.telegram_bot_id if bot else None,
+                monitoring_id=n.monitoring_id,
+                message=n.message,
+            )
         )
     return out
 

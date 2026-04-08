@@ -1,3 +1,4 @@
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -9,6 +10,8 @@ class Settings(BaseSettings):
     cors_origins: str = "*"
     admin_api_token: str = "change_me_admin_token"
     internal_api_token: str = "change_me_internal_token"
+    default_bot_token: str | None = Field(default=None, validation_alias="BOT_TOKEN")
+    default_bot_name: str = "Основной бот"
 
 
 settings = Settings()

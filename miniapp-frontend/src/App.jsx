@@ -1,497 +1,344 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   authTelegramUser,
-  createMonitoring,
-  deleteMonitoring,
-  getMonitoringItems,
   getMonitorings,
-  getNotifications,
   getPlans,
   getProfile,
+  purchaseMonitoring,
+  purchaseSubscription,
 } from './api'
 
-function getTelegramUser() {
+const TABS = {
+  info: 'info',
+  subscriptions: 'subscriptions',
+  profile: 'profile',
+}
+
+function telegramUser() {
   const tg = window.Telegram?.WebApp
   if (!tg) return null
   tg.ready()
+  tg.expand?.()
   return tg.initDataUnsafe?.user || null
 }
 
 function formatDate(value) {
-  if (!value) return '-'
-  const date = new Date(value)
-  return date.toLocaleString('ru-RU')
+  if (!value) return '—'
+  return new Date(value).toLocaleString('ru-RU')
 }
 
-function isSubscriptionExpiringSoon(profile) {
-  if (!profile?.subscription?.ends_at) return false
-  const diffDays = (new Date(profile.subscription.ends_at) - new Date()) / (1000 * 60 * 60 * 24)
-  return diffDays >= 0 && diffDays <= 5
+function formatUsername(bot) {
+  if (!bot?.bot_username) return null
+  return bot.bot_username.startsWith('@') ? bot.bot_username : `@${bot.bot_username}`
 }
 
-function isSubscriptionInactive(profile) {
-  return !profile?.subscription
+function statusClass(monitoring) {
+  if (!monitoring.link_configured) return 'badge neutral'
+  return monitoring.is_active ? 'badge active' : 'badge stopped'
 }
 
-function getStatusPillClass(loading, statusText) {
-  if (loading) return 'status-pill loading'
-  if (statusText.startsWith('Ошибка')) return 'status-pill error'
-  return 'status-pill'
+function monitoringStatusText(monitoring) {
+  if (!monitoring.link_configured) return 'link required'
+  return monitoring.is_active ? 'running' : 'stopped'
 }
 
 export default function App() {
+  const [tab, setTab] = useState(TABS.subscriptions)
   const [telegramId, setTelegramId] = useState(null)
-  const [manualId, setManualId] = useState('')
-  const [statusText, setStatusText] = useState('Инициализация miniapp...')
   const [loading, setLoading] = useState(true)
-
-  const [profile, setProfile] = useState(null)
+  const [statusMessage, setStatusMessage] = useState('Инициализация...')
   const [plans, setPlans] = useState([])
+  const [profile, setProfile] = useState(null)
   const [monitorings, setMonitorings] = useState([])
-  const [notifications, setNotifications] = useState([])
+  const [selectedPlanId, setSelectedPlanId] = useState('')
+  const [purchaseBusy, setPurchaseBusy] = useState(false)
+  const [monitoringBusy, setMonitoringBusy] = useState(false)
 
-  const [selectedMonitoringId, setSelectedMonitoringId] = useState(null)
-  const [items, setItems] = useState([])
-
-  const [form, setForm] = useState({
-    url: '',
-    title: '',
-    keywords_white: '',
-    keywords_black: '',
-    min_price: '',
-    max_price: '',
-    geo: '',
-  })
-
-  const activeMonitoring = useMemo(
-    () => monitorings.find((m) => m.id === selectedMonitoringId) || null,
-    [monitorings, selectedMonitoringId],
+  const activePlan = useMemo(
+    () => plans.find((plan) => plan.id === Number(selectedPlanId)) || null,
+    [plans, selectedPlanId],
   )
 
-  const resolveTelegramId = () => {
-    const tgUser = getTelegramUser()
-    if (tgUser?.id) return Number(tgUser.id)
-
-    const query = new URLSearchParams(window.location.search)
-    const queryId = query.get('tg_id')
-    if (queryId) return Number(queryId)
-
-    return null
-  }
-
-  const refreshData = async (tgId) => {
-    const [profileData, plansData, monitoringsData, notificationsData] = await Promise.all([
+  const loadData = async (tgId) => {
+    const [profileData, plansData, monitoringsData] = await Promise.all([
       getProfile(tgId),
       getPlans(),
       getMonitorings(tgId),
-      getNotifications(tgId),
     ])
-
     setProfile(profileData)
     setPlans(plansData)
     setMonitorings(monitoringsData)
-    setNotifications(notificationsData)
-
-    if (!selectedMonitoringId && monitoringsData.length > 0) {
-      setSelectedMonitoringId(monitoringsData[0].id)
+    if (!selectedPlanId && plansData.length > 0) {
+      setSelectedPlanId(String(plansData[0].id))
     }
   }
 
   useEffect(() => {
     const init = async () => {
       try {
-        const resolvedId = resolveTelegramId()
-        if (!resolvedId) {
-          setStatusText('Не удалось определить Telegram ID. Введите вручную для локального теста.')
-          setLoading(false)
+        const user = telegramUser()
+        if (!user?.id) {
+          setStatusMessage('Откройте miniapp через Telegram-бота')
           return
         }
+        const tgId = Number(user.id)
+        setTelegramId(tgId)
 
-        setTelegramId(resolvedId)
-        await authTelegramUser({ telegram_id: resolvedId })
-        await refreshData(resolvedId)
-        setStatusText('Система готова: мониторинг Avito активен')
+        const fullName = [user.first_name, user.last_name].filter(Boolean).join(' ') || null
+        await authTelegramUser({
+          telegram_id: tgId,
+          username: user.username || null,
+          full_name: fullName,
+        })
+        await loadData(tgId)
+        setStatusMessage('Подключено')
       } catch (error) {
-        const message =
-          error?.response?.data?.detail || error?.message || 'Ошибка загрузки miniapp данных'
-        setStatusText(`Ошибка: ${message}`)
+        const detail = error?.response?.data?.detail || error?.message || 'Ошибка инициализации'
+        setStatusMessage(`Ошибка: ${detail}`)
       } finally {
         setLoading(false)
       }
     }
+
     init()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  useEffect(() => {
-    if (!telegramId || !selectedMonitoringId) return
-
-    getMonitoringItems(telegramId, selectedMonitoringId)
-      .then(setItems)
-      .catch((error) => {
-        const message = error?.response?.data?.detail || error?.message || 'Не удалось загрузить объявления'
-        setStatusText(`Ошибка: ${message}`)
-      })
-  }, [telegramId, selectedMonitoringId])
-
-  const onSubmitManualId = async () => {
-    const parsed = Number(manualId)
-    if (!parsed) {
-      setStatusText('Введите корректный Telegram ID')
-      return
-    }
-
+  const onBuySubscription = async () => {
+    if (!telegramId || !selectedPlanId || purchaseBusy) return
     try {
-      setLoading(true)
-      setTelegramId(parsed)
-      await authTelegramUser({ telegram_id: parsed })
-      await refreshData(parsed)
-      setStatusText('Подключение по Telegram ID выполнено')
-    } catch (error) {
-      const message = error?.response?.data?.detail || error?.message || 'Ошибка подключения'
-      setStatusText(`Ошибка: ${message}`)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const onCreateMonitoring = async (event) => {
-    event.preventDefault()
-    if (!telegramId) return
-
-    try {
-      await createMonitoring({
+      setPurchaseBusy(true)
+      await purchaseSubscription({
         telegram_id: telegramId,
-        url: form.url,
-        title: form.title || null,
-        keywords_white: form.keywords_white
-          .split(',')
-          .map((v) => v.trim())
-          .filter(Boolean),
-        keywords_black: form.keywords_black
-          .split(',')
-          .map((v) => v.trim())
-          .filter(Boolean),
-        min_price: form.min_price ? Number(form.min_price) : null,
-        max_price: form.max_price ? Number(form.max_price) : null,
-        geo: form.geo || null,
+        plan_id: Number(selectedPlanId),
       })
-
-      setForm({
-        url: '',
-        title: '',
-        keywords_white: '',
-        keywords_black: '',
-        min_price: '',
-        max_price: '',
-        geo: '',
-      })
-      await refreshData(telegramId)
-      setStatusText('Ссылка добавлена. Парсер начнет цикл на следующей итерации.')
+      await loadData(telegramId)
+      setStatusMessage(`Подписка активирована: ${activePlan?.name || 'тариф'}`)
     } catch (error) {
-      const message = error?.response?.data?.detail || error?.message || 'Ошибка добавления ссылки'
-      setStatusText(`Ошибка: ${message}`)
+      const detail = error?.response?.data?.detail || error?.message || 'Ошибка покупки подписки'
+      setStatusMessage(`Ошибка: ${detail}`)
+    } finally {
+      setPurchaseBusy(false)
     }
   }
 
-  const onDeleteMonitoring = async (monitoringId) => {
-    if (!telegramId) return
+  const onBuyMonitoring = async () => {
+    if (!telegramId || monitoringBusy) return
     try {
-      await deleteMonitoring(telegramId, monitoringId)
-      await refreshData(telegramId)
-      if (selectedMonitoringId === monitoringId) {
-        setSelectedMonitoringId(null)
-        setItems([])
+      setMonitoringBusy(true)
+      const monitoring = await purchaseMonitoring({
+        telegram_id: telegramId,
+      })
+      await loadData(telegramId)
+      if (monitoring?.bot?.bot_link) {
+        setStatusMessage(`Мониторинг куплен. Откройте ${monitoring.bot.bot_link}`)
+      } else {
+        setStatusMessage('Мониторинг куплен. Бот привязан, ссылка появится после синхронизации.')
       }
-      setStatusText('Мониторинг удален')
     } catch (error) {
-      const message = error?.response?.data?.detail || error?.message || 'Ошибка удаления'
-      setStatusText(`Ошибка: ${message}`)
+      const detail = error?.response?.data?.detail || error?.message || 'Ошибка покупки мониторинга'
+      setStatusMessage(`Ошибка: ${detail}`)
+    } finally {
+      setMonitoringBusy(false)
+    }
+  }
+
+  const copyText = async (value, okMessage) => {
+    if (!value) return
+    try {
+      await navigator.clipboard.writeText(value)
+      setStatusMessage(okMessage)
+    } catch (error) {
+      setStatusMessage('Не удалось скопировать')
     }
   }
 
   return (
-    <div className="page">
-      <div className="aurora" aria-hidden="true" />
-
-      {/* Hero */}
-      <header className="hero card">
-        <div className="hero-top">
+    <div className="app-shell">
+      <div className="bg-layer" aria-hidden="true" />
+      <main className="app-main">
+        <header className="hero">
           <div>
-            <p className="eyebrow">Telegram MiniApp</p>
-            <div className="hero-title-wrap">
-              <h1>Avito Monitor</h1>
-            </div>
-            <p className="subtitle" style={{ marginTop: 10 }}>
-              Быстрый парсинг новых объявлений Avito с фильтрами.
+            <p className="eyebrow">Avito Monitor</p>
+            <h1>MiniApp Control</h1>
+            <p className="sub">
+              Управление подпиской и выдачей ботов. Вся работа по ссылке ведётся внутри назначенного бота.
             </p>
           </div>
-          <div className={getStatusPillClass(loading, statusText)}>
-            {loading ? 'Загрузка...' : statusText}
+          <div className={`status ${statusMessage.startsWith('Ошибка') ? 'error' : ''}`}>
+            {loading ? 'Загрузка...' : statusMessage}
           </div>
-        </div>
-      </header>
+        </header>
 
-      {/* Subscription banners */}
-      {!loading && telegramId && isSubscriptionInactive(profile) && (
-        <div className="sub-banner inactive card">
-          <div className="sub-banner-text">
-            <strong>Подписка не активна</strong>
-            <small>Купите тариф ниже, чтобы запустить мониторинг</small>
-          </div>
-        </div>
-      )}
-      {!loading && telegramId && !isSubscriptionInactive(profile) && isSubscriptionExpiringSoon(profile) && (
-        <div className="sub-banner warn card">
-          <div className="sub-banner-text">
-            <strong>Подписка истекает скоро</strong>
-            <small>до {formatDate(profile.subscription.ends_at)}</small>
-          </div>
-        </div>
-      )}
-
-      {/* Manual ID entry */}
-      {!telegramId && (
-        <section className="card">
-          <h2>Локальный вход</h2>
-          <p className="hint">MiniApp не получил Telegram ID автоматически. Введите ID для теста.</p>
-          <div className="inline-form">
-            <input
-              value={manualId}
-              onChange={(e) => setManualId(e.target.value)}
-              placeholder="Telegram ID"
-            />
-            <button onClick={onSubmitManualId}>Подключить</button>
-          </div>
-        </section>
-      )}
-
-      {/* Stats */}
-      <section className="grid stats-grid">
-        <article className="card metric">
-          <div className="metric-icon">🔗</div>
-          <span>Активных ссылок</span>
-          {loading
-            ? <div className="skeleton skeleton-text wide" style={{ height: 28, marginBottom: 0 }} />
-            : <strong>{profile?.active_monitorings ?? 0}</strong>
-          }
-        </article>
-        <article className="card metric">
-          <div className="metric-icon">🔔</div>
-          <span>Уведомлений</span>
-          {loading
-            ? <div className="skeleton skeleton-text wide" style={{ height: 28, marginBottom: 0 }} />
-            : <strong>{notifications.length}</strong>
-          }
-        </article>
-        <article className="card metric">
-          <div className="metric-icon">✦</div>
-          <span>Подписка</span>
-          {loading
-            ? <div className="skeleton skeleton-text wide" style={{ height: 28, marginBottom: 0 }} />
-            : <strong style={{ fontSize: 14, fontWeight: 700 }}>
-                {profile?.subscription
-                  ? `до ${formatDate(profile.subscription.ends_at)}`
-                  : 'Нет'}
-              </strong>
-          }
-        </article>
-      </section>
-
-      {/* Add monitoring + Plans */}
-      <section className="grid two-columns">
-        <article className="card">
-          <h2>Добавить ссылку</h2>
-          <form className="stack" onSubmit={onCreateMonitoring}>
-            <label className="form-label">
-              URL Avito
-              <input
-                required
-                value={form.url}
-                onChange={(e) => setForm((prev) => ({ ...prev, url: e.target.value }))}
-                placeholder="https://www.avito.ru/..."
-              />
-            </label>
-            <label className="form-label">
-              Название (опционально)
-              <input
-                value={form.title}
-                onChange={(e) => setForm((prev) => ({ ...prev, title: e.target.value }))}
-                placeholder="Например: iPhone 15"
-              />
-            </label>
-            <div className="inline-form">
-              <label className="form-label">
-                Белые слова
-                <input
-                  value={form.keywords_white}
-                  onChange={(e) => setForm((prev) => ({ ...prev, keywords_white: e.target.value }))}
-                  placeholder="слово1, слово2"
-                />
-              </label>
-              <label className="form-label">
-                Черные слова
-                <input
-                  value={form.keywords_black}
-                  onChange={(e) => setForm((prev) => ({ ...prev, keywords_black: e.target.value }))}
-                  placeholder="слово1, слово2"
-                />
-              </label>
-            </div>
-            <div className="inline-form">
-              <label className="form-label">
-                Мин. цена
-                <input
-                  type="number"
-                  value={form.min_price}
-                  onChange={(e) => setForm((prev) => ({ ...prev, min_price: e.target.value }))}
-                  placeholder="0"
-                />
-              </label>
-              <label className="form-label">
-                Макс. цена
-                <input
-                  type="number"
-                  value={form.max_price}
-                  onChange={(e) => setForm((prev) => ({ ...prev, max_price: e.target.value }))}
-                  placeholder="∞"
-                />
-              </label>
-            </div>
-            <label className="form-label">
-              Город / регион
-              <input
-                value={form.geo}
-                onChange={(e) => setForm((prev) => ({ ...prev, geo: e.target.value }))}
-                placeholder="Москва"
-              />
-            </label>
-            <button type="submit">Запустить мониторинг</button>
-          </form>
-        </article>
-
-        <article className="card">
-          <h2>Тарифные планы</h2>
-          <div className="plans-list">
-            {loading && (
-              <>
-                <div className="plan-item">
-                  <div className="skeleton skeleton-text wide" style={{ height: 16, margin: 0 }} />
-                </div>
-                <div className="plan-item">
-                  <div className="skeleton skeleton-text wide" style={{ height: 16, margin: 0 }} />
-                </div>
-              </>
-            )}
-            {plans.map((plan) => (
-              <div key={plan.id} className="plan-item">
-                <div>
-                  <strong>{plan.name}</strong>
-                  <p>{plan.links_limit} ссылок · {plan.duration_days} дней</p>
-                </div>
-                <span className="plan-price">{plan.price_rub} ₽</span>
+        {!loading && tab === TABS.info && (
+          <section className="stack">
+            <article className="card">
+              <h2>Информация</h2>
+              <p className="muted">Основные ссылки сервиса.</p>
+              <div className="links">
+                <a href="https://t.me/your_support" target="_blank" rel="noreferrer">Поддержка</a>
+                <a href="https://t.me/your_faq" target="_blank" rel="noreferrer">Частые вопросы</a>
+                <a href="https://t.me/your_news" target="_blank" rel="noreferrer">Новостной канал</a>
+                <a href="https://t.me/your_terms" target="_blank" rel="noreferrer">Пользовательское соглашение</a>
+                <a href="https://t.me/your_privacy" target="_blank" rel="noreferrer">Политика конфиденциальности</a>
               </div>
-            ))}
-          </div>
-          <p className="hint" style={{ marginTop: 12 }}>
-            Для покупки обратитесь к боту или администратору.
-          </p>
-        </article>
-      </section>
+            </article>
+          </section>
+        )}
 
-      {/* Monitorings + Ads */}
-      <section className="grid two-columns">
-        <article className="card">
-          <h2>Мои мониторинги</h2>
-          <div className="monitoring-list">
-            {loading && (
-              <>
-                {[1, 2].map((i) => (
-                  <div key={i} className="monitoring-item" style={{ pointerEvents: 'none' }}>
-                    <div style={{ width: '100%' }}>
-                      <div className="skeleton skeleton-text wide" />
-                      <div className="skeleton skeleton-text mid" />
+        {!loading && tab === TABS.subscriptions && (
+          <section className="stack">
+            <article className="card">
+              <h2>Активные боты</h2>
+              <p className="muted">
+                На каждый купленный мониторинг назначается отдельный бот для вашего аккаунта.
+              </p>
+              <div className="monitorings">
+                {monitorings.length === 0 && (
+                  <div className="empty">У вас пока нет купленных мониторингов.</div>
+                )}
+                {monitorings.map((monitoring) => (
+                  <div className="monitoring-item" key={monitoring.id}>
+                    <div>
+                      <strong>{monitoring.title || `Мониторинг #${monitoring.id}`}</strong>
+                      <p>{monitoring.url}</p>
+                      <p>
+                        Бот: {monitoring.bot?.name || 'не назначен'}
+                        {formatUsername(monitoring.bot) ? ` (${formatUsername(monitoring.bot)})` : ''}
+                      </p>
+                    </div>
+                    <div className="monitoring-side">
+                      <span className={statusClass(monitoring)}>{monitoringStatusText(monitoring)}</span>
+                      {monitoring.bot?.bot_link && (
+                        <a href={monitoring.bot.bot_link} target="_blank" rel="noreferrer" className="mini-link">
+                          Открыть бота
+                        </a>
+                      )}
                     </div>
                   </div>
                 ))}
-              </>
-            )}
-            {!loading && monitorings.length === 0 && (
-              <div className="empty-state">
-                <span className="empty-icon">🔍</span>
-                <p>Пока нет активных мониторингов.<br />Добавьте первую ссылку!</p>
               </div>
-            )}
-            {monitorings.map((m) => (
-              <button
-                key={m.id}
-                className={`monitoring-item ${selectedMonitoringId === m.id ? 'active' : ''}`}
-                onClick={() => setSelectedMonitoringId(m.id)}
-              >
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div className="monitoring-header">
-                    <span className={`status-dot ${selectedMonitoringId === m.id ? 'green' : 'gray'}`} />
-                    <strong style={{ fontSize: 14 }}>{m.title || `Ссылка #${m.id}`}</strong>
-                  </div>
-                  <p>{m.url}</p>
-                  <small>Проверено: {formatDate(m.last_checked_at)}</small>
-                </div>
-                <button
-                  className="monitoring-delete"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onDeleteMonitoring(m.id)
-                  }}
-                >
-                  Удалить
-                </button>
-              </button>
-            ))}
-          </div>
-        </article>
+            </article>
 
-        <article className="card">
-          <h2>
-            Объявления
-            {activeMonitoring && (
-              <span style={{ fontWeight: 500, color: 'var(--muted)', fontSize: 13, marginLeft: 6 }}>
-                — {activeMonitoring.title || `#${activeMonitoring.id}`}
-              </span>
-            )}
-          </h2>
-          <div className="ads-list">
-            {loading && (
-              <>
-                {[1, 2, 3].map((i) => (
-                  <div key={i} className="ad-item" style={{ pointerEvents: 'none' }}>
-                    <div className="skeleton skeleton-text wide" />
-                    <div className="skeleton skeleton-text short" style={{ height: 20 }} />
-                    <div className="skeleton skeleton-text mid" />
+            <article className="card">
+              <h2>Подписки</h2>
+              <p className="muted">
+                Активная подписка:{' '}
+                {profile?.subscription
+                  ? `${profile.subscription.plan_name} до ${formatDate(profile.subscription.ends_at)}`
+                  : 'нет'}
+              </p>
+              <div className="buy-row">
+                <select
+                  value={selectedPlanId}
+                  onChange={(event) => setSelectedPlanId(event.target.value)}
+                >
+                  {plans.map((plan) => (
+                    <option key={plan.id} value={plan.id}>
+                      {plan.name} • {plan.price_rub} ₽
+                    </option>
+                  ))}
+                </select>
+                <button type="button" onClick={onBuySubscription} disabled={!selectedPlanId || purchaseBusy}>
+                  {purchaseBusy ? 'Покупка...' : 'Купить подписку'}
+                </button>
+              </div>
+              <div className="plans-list">
+                {plans.map((plan) => (
+                  <div key={plan.id} className="plan">
+                    <strong>{plan.name}</strong>
+                    <span>{plan.links_limit} мониторингов • {plan.duration_days} дней</span>
+                    <span>{plan.price_rub} ₽</span>
                   </div>
                 ))}
-              </>
-            )}
-            {!loading && items.length === 0 && (
-              <div className="empty-state">
-                <span className="empty-icon">📭</span>
-                <p>Новых объявлений нет.<br />Выберите мониторинг или дождитесь следующего цикла.</p>
               </div>
-            )}
-            {items.map((item) => (
-              <a href={item.url} key={item.id} target="_blank" rel="noreferrer" className="ad-item">
-                <span className="ad-title">{item.title}</span>
-                <span className="ad-price">
-                  {item.price_rub ? `${item.price_rub.toLocaleString('ru-RU')} ₽` : 'Цена не указана'}
-                </span>
-                <div className="ad-footer">
-                  <span className="ad-location">{item.location || 'Локация не указана'}</span>
-                  <span className="ad-time">Найдено: {formatDate(item.first_seen_at)}</span>
+            </article>
+
+            <article className="card">
+              <h2>Купить мониторинг</h2>
+              <p className="muted">
+                После покупки вы получите бота под новый мониторинг. Управление ссылкой/запуском выполняется в самом боте.
+              </p>
+              <button type="button" onClick={onBuyMonitoring} disabled={monitoringBusy}>
+                {monitoringBusy ? 'Оформление...' : 'Купить мониторинг'}
+              </button>
+            </article>
+          </section>
+        )}
+
+        {!loading && tab === TABS.profile && (
+          <section className="stack">
+            <article className="card">
+              <h2>Профиль</h2>
+              <div className="profile-list">
+                <div className="profile-row">
+                  <span>Telegram ID</span>
+                  <div>
+                    <strong>{profile?.user?.telegram_id || telegramId || '—'}</strong>
+                    <button
+                      type="button"
+                      className="text-btn"
+                      onClick={() =>
+                        copyText(String(profile?.user?.telegram_id || telegramId || ''), 'Telegram ID скопирован')
+                      }
+                    >
+                      Копировать
+                    </button>
+                  </div>
                 </div>
-              </a>
-            ))}
-          </div>
-        </article>
-      </section>
+                <div className="profile-row">
+                  <span>Реферальная ссылка</span>
+                  <div>
+                    <strong>{profile?.referral_link || profile?.user?.referral_code || '—'}</strong>
+                    <button
+                      type="button"
+                      className="text-btn"
+                      onClick={() =>
+                        copyText(
+                          profile?.referral_link || profile?.user?.referral_code || '',
+                          'Реферальная ссылка скопирована',
+                        )
+                      }
+                    >
+                      Копировать
+                    </button>
+                  </div>
+                </div>
+                <div className="profile-row">
+                  <span>Реф. баланс</span>
+                  <div>
+                    <strong>{profile?.user?.referral_balance_rub ?? 0} ₽</strong>
+                  </div>
+                </div>
+              </div>
+            </article>
+          </section>
+        )}
+      </main>
+
+      <nav className="bottom-nav">
+        <button
+          type="button"
+          className={tab === TABS.info ? 'tab active' : 'tab'}
+          onClick={() => setTab(TABS.info)}
+        >
+          Информация
+        </button>
+        <button
+          type="button"
+          className={tab === TABS.subscriptions ? 'tab active' : 'tab'}
+          onClick={() => setTab(TABS.subscriptions)}
+        >
+          Подписки
+        </button>
+        <button
+          type="button"
+          className={tab === TABS.profile ? 'tab active' : 'tab'}
+          onClick={() => setTab(TABS.profile)}
+        >
+          Профиль
+        </button>
+      </nav>
     </div>
   )
 }

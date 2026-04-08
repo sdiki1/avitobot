@@ -24,8 +24,27 @@ class User(Base):
     telegram_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True)
     username: Mapped[str | None] = mapped_column(String(255), nullable=True)
     full_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    referral_code: Mapped[str | None] = mapped_column(String(64), unique=True, index=True, nullable=True)
+    referral_balance_rub: Mapped[int] = mapped_column(Integer, default=0)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class TelegramBot(Base):
+    __tablename__ = "telegram_bots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), unique=True)
+    bot_token: Mapped[str] = mapped_column(String(255), unique=True)
+    telegram_bot_id: Mapped[int | None] = mapped_column(BigInteger, unique=True, nullable=True)
+    bot_username: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
 
 
 class TariffPlan(Base):
@@ -67,6 +86,7 @@ class Monitoring(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    bot_id: Mapped[int | None] = mapped_column(ForeignKey("telegram_bots.id", ondelete="SET NULL"), nullable=True, index=True)
     url: Mapped[str] = mapped_column(Text)
     title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     keywords_white: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -75,6 +95,7 @@ class Monitoring(Base):
     max_price: Mapped[int | None] = mapped_column(Integer, nullable=True)
     geo: Mapped[str | None] = mapped_column(String(255), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    link_configured: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -84,6 +105,7 @@ class Monitoring(Base):
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     user = relationship("User")
+    bot = relationship("TelegramBot")
 
 
 class MonitoringItem(Base):

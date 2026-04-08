@@ -1,0 +1,76 @@
+<%- include('partials/header', { title: 'Боты' }) %>
+
+<section class="card">
+  <h1>Telegram-боты</h1>
+  <p class="muted">Каждый купленный мониторинг привязывается к отдельному боту пользователя.</p>
+
+  <% if (success) { %>
+    <div class="alert info"><%= success %></div>
+  <% } %>
+  <% if (error) { %>
+    <div class="alert error"><%= error %></div>
+  <% } %>
+
+  <h2>Добавить бота</h2>
+  <form class="form-grid" action="<%= adminBase %>/bots" method="post">
+    <input name="name" placeholder="Название бота" required />
+    <input name="bot_token" placeholder="Токен бота" required />
+    <label>
+      <input name="is_active" type="checkbox" checked />
+      Активен
+    </label>
+    <button type="submit">Добавить</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Список ботов</h2>
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Имя</th>
+          <th>Username</th>
+          <th>Ссылка</th>
+          <th>Статус</th>
+          <th>Обновление</th>
+        </tr>
+      </thead>
+      <tbody>
+      <% bots.forEach((bot) => { %>
+        <tr>
+          <td><strong><%= bot.id %></strong></td>
+          <td><%= bot.name %></td>
+          <td><%= bot.bot_username ? `@${bot.bot_username}` : '—' %></td>
+          <td>
+            <% if (bot.bot_link) { %>
+              <a href="<%= bot.bot_link %>" target="_blank" rel="noreferrer"><%= bot.bot_link %></a>
+            <% } else { %>
+              —
+            <% } %>
+          </td>
+          <td><span class="badge <%= bot.is_active ? 'active' : 'disabled' %>"><%= bot.is_active ? 'active' : 'disabled' %></span></td>
+          <td>
+            <form class="stack" action="<%= adminBase %>/bots/<%= bot.id %>/update" method="post">
+              <input name="name" value="<%= bot.name %>" required />
+              <input name="bot_username" value="<%= bot.bot_username || '' %>" placeholder="bot_username" />
+              <input name="bot_token" placeholder="Новый токен (опционально)" />
+              <label>
+                <input name="is_active" type="checkbox" <%= bot.is_active ? 'checked' : '' %> />
+                Активен
+              </label>
+              <div class="actions">
+                <button type="submit">Сохранить</button>
+                <button type="submit" class="danger" formaction="<%= adminBase %>/bots/<%= bot.id %>/delete">Удалить</button>
+              </div>
+            </form>
+          </td>
+        </tr>
+      <% }) %>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<%- include('partials/footer') %>

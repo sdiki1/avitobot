@@ -2,22 +2,26 @@ from __future__ import annotations
 
 import asyncio
 import os
+from contextlib import suppress
+from dataclasses import dataclass
 from typing import Any
 
+import httpx
 from aiogram import Bot, Dispatcher, Router
+from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandStart
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, WebAppInfo
-from aiogram.client.default import DefaultBotProperties
+from aiogram.types import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Message, WebAppInfo
 from aiogram.utils.token import TokenValidationError, validate_token
-import httpx
 from loguru import logger
 
 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 BACKEND_URL = os.getenv("BACKEND_URL", "http://miniapp-backend:8000").rstrip("/")
 INTERNAL_API_TOKEN = os.getenv("INTERNAL_API_TOKEN", "change_me_internal_token")
 MINIAPP_PUBLIC_URL = os.getenv("MINIAPP_PUBLIC_URL", "http://localhost")
+BOTS_REFRESH_SEC = int(os.getenv("BOTS_REFRESH_SEC", "15"))
+NOTIFY_POLL_SEC = int(os.getenv("NOTIFY_POLL_SEC", "4"))
+
 
 def has_valid_bot_token(token: str) -> bool:
     if not token:
@@ -29,7 +33,43 @@ def has_valid_bot_token(token: str) -> bool:
     return True
 
 
-router = Router()
+def miniapp_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Открыть MiniApp", web_app=WebAppInfo(url=MINIAPP_PUBLIC_URL))],
+        ]
+    )
+
+
+def _response_json(response: httpx.Response) -> dict[str, Any]:
+    try:
+        payload = response.json()
+        if isinstance(payload, dict):
+            return payload
+    except Exception:
+        pass
+    return {"detail": response.text}
+
+
+def _extract_error(payload: dict[str, Any]) -> str:
+    detail = payload.get("detail")
+    if isinstance(detail, str):
+        return detail
+    if detail:
+        return str(detail)
+    return "Неизвестная ошибка"
+
+
+def _format_monitoring_status(monitoring: dict[str, Any]) -> str:
+    state = "включен" if monitoring.get("is_active") else "остановлен"
+    link_configured = "да" if monitoring.get("link_configured") else "нет"
+    title = monitoring.get("title") or f"#{monitoring.get('monitoring_id')}"
+    return (
+        f"Мониторинг: {title}\n"
+        f"Статус: {state}\n"
+        f"Ссылка задана: {link_configured}\n"
+        f"Текущая ссылка: {monitoring.get('url')}"
+    )
 
 
 class BackendAPI:
@@ -52,29 +92,64 @@ class BackendAPI:
     async def list_plans(self) -> list[dict[str, Any]]:
         response = await self.client.get(f"{BACKEND_URL}/api/v1/public/plans")
         response.raise_for_status()
-        return response.json()
+        payload = response.json()
+        return payload if isinstance(payload, list) else []
 
-    async def list_monitorings(self, telegram_id: int) -> list[dict[str, Any]]:
+    async def active_bots(self) -> list[dict[str, Any]]:
         response = await self.client.get(
-            f"{BACKEND_URL}/api/v1/public/monitorings",
-            params={"telegram_id": telegram_id},
+            f"{BACKEND_URL}/api/v1/internal/bots/active",
+            headers={"X-Internal-Token": INTERNAL_API_TOKEN},
         )
         response.raise_for_status()
-        return response.json()
+        payload = response.json()
+        return payload if isinstance(payload, list) else []
 
-    async def add_monitoring(self, telegram_id: int, url: str) -> tuple[int, dict[str, Any]]:
+    async def sync_bot_metadata(self, bot_id: int, telegram_bot_id: int, bot_username: str | None) -> None:
         payload = {
-            "telegram_id": telegram_id,
-            "url": url,
-            "title": None,
-            "keywords_white": [],
-            "keywords_black": [],
-            "min_price": None,
-            "max_price": None,
-            "geo": None,
+            "telegram_bot_id": telegram_bot_id,
+            "bot_username": bot_username,
         }
-        response = await self.client.post(f"{BACKEND_URL}/api/v1/public/monitorings", json=payload)
-        return response.status_code, response.json()
+        response = await self.client.post(
+            f"{BACKEND_URL}/api/v1/internal/bots/{bot_id}/sync",
+            json=payload,
+            headers={"X-Internal-Token": INTERNAL_API_TOKEN},
+        )
+        response.raise_for_status()
+
+    async def current_monitoring(self, bot_id: int, telegram_id: int) -> tuple[int, dict[str, Any]]:
+        response = await self.client.get(
+            f"{BACKEND_URL}/api/v1/internal/bot-monitoring/current",
+            params={"telegram_id": telegram_id, "bot_id": bot_id},
+            headers={"X-Internal-Token": INTERNAL_API_TOKEN},
+        )
+        return response.status_code, _response_json(response)
+
+    async def start_monitoring(self, bot_id: int, telegram_id: int) -> tuple[int, dict[str, Any]]:
+        payload = {"telegram_id": telegram_id, "bot_id": bot_id}
+        response = await self.client.post(
+            f"{BACKEND_URL}/api/v1/internal/bot-monitoring/start",
+            json=payload,
+            headers={"X-Internal-Token": INTERNAL_API_TOKEN},
+        )
+        return response.status_code, _response_json(response)
+
+    async def stop_monitoring(self, bot_id: int, telegram_id: int) -> tuple[int, dict[str, Any]]:
+        payload = {"telegram_id": telegram_id, "bot_id": bot_id}
+        response = await self.client.post(
+            f"{BACKEND_URL}/api/v1/internal/bot-monitoring/stop",
+            json=payload,
+            headers={"X-Internal-Token": INTERNAL_API_TOKEN},
+        )
+        return response.status_code, _response_json(response)
+
+    async def change_link(self, bot_id: int, telegram_id: int, url: str) -> tuple[int, dict[str, Any]]:
+        payload = {"telegram_id": telegram_id, "bot_id": bot_id, "url": url}
+        response = await self.client.post(
+            f"{BACKEND_URL}/api/v1/internal/bot-monitoring/change-link",
+            json=payload,
+            headers={"X-Internal-Token": INTERNAL_API_TOKEN},
+        )
+        return response.status_code, _response_json(response)
 
     async def pending_notifications(self, limit: int = 100) -> list[dict[str, Any]]:
         response = await self.client.get(
@@ -83,7 +158,8 @@ class BackendAPI:
             headers={"X-Internal-Token": INTERNAL_API_TOKEN},
         )
         response.raise_for_status()
-        return response.json()
+        payload = response.json()
+        return payload if isinstance(payload, list) else []
 
     async def mark_notification_sent(self, notification_id: int) -> None:
         response = await self.client.post(
@@ -93,130 +169,251 @@ class BackendAPI:
         response.raise_for_status()
 
 
-backend = BackendAPI()
+def build_router(bot_id: int, backend: BackendAPI) -> Router:
+    router = Router()
 
-
-def miniapp_keyboard(telegram_id: int) -> InlineKeyboardMarkup:
-    url = f"{MINIAPP_PUBLIC_URL}?tg_id={telegram_id}"
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="Открыть MiniApp", web_app=WebAppInfo(url=url))],
-        ]
-    )
-
-
-@router.message(CommandStart())
-async def cmd_start(message: Message) -> None:
-    tg_user = message.from_user
-    await backend.auth_user(
-        telegram_id=tg_user.id,
-        username=tg_user.username,
-        full_name=tg_user.full_name,
-    )
-
-    text = (
-        "Avito мониторинг запущен.\n"
-        "Основной продукт: поиск новых объявлений на Avito по вашим ссылкам.\n\n"
-        "Команды:\n"
-        "/plans - тарифы\n"
-        "/my_links - мои ссылки\n"
-        "/add_link &lt;url&gt; - добавить ссылку\n"
-        "/miniapp - открыть miniapp"
-    )
-    await message.answer(text, reply_markup=miniapp_keyboard(tg_user.id))
-
-
-@router.message(Command("plans"))
-async def cmd_plans(message: Message) -> None:
-    plans = await backend.list_plans()
-    if not plans:
-        await message.answer("Тарифы пока не настроены в админ-панели")
-        return
-
-    lines = ["Доступные тарифы:"]
-    for p in plans:
-        lines.append(
-            f"• {p['name']}: {p['price_rub']}₽ | {p['links_limit']} ссылок | {p['duration_days']} дней"
+    @router.message(CommandStart())
+    async def cmd_start(message: Message) -> None:
+        tg_user = message.from_user
+        await backend.auth_user(
+            telegram_id=tg_user.id,
+            username=tg_user.username,
+            full_name=tg_user.full_name,
         )
-    await message.answer("\n".join(lines))
+        status_code, payload = await backend.current_monitoring(bot_id=bot_id, telegram_id=tg_user.id)
+        if status_code == 200:
+            text = (
+                "Этот бот привязан к вашему мониторингу.\n\n"
+                f"{_format_monitoring_status(payload)}\n\n"
+                "Команды:\n"
+                "/start_monitoring - запустить мониторинг\n"
+                "/stop_monitoring - остановить мониторинг\n"
+                "/change_link <url> - поменять ссылку\n"
+                "/status - текущий статус\n"
+                "/miniapp - открыть miniapp"
+            )
+        elif status_code == 404:
+            text = (
+                "Этот бот пока не назначен вам.\n"
+                "Купите мониторинг в miniapp и получите привязку автоматически."
+            )
+        else:
+            text = f"Не удалось получить мониторинг: {_extract_error(payload)}"
+        await message.answer(text, reply_markup=miniapp_keyboard())
+
+    @router.message(Command("plans"))
+    async def cmd_plans(message: Message) -> None:
+        plans = await backend.list_plans()
+        if not plans:
+            await message.answer("Тарифы пока не настроены в админ-панели.")
+            return
+        lines = ["Доступные тарифы:"]
+        for plan in plans:
+            lines.append(
+                f"• {plan['name']}: {plan['price_rub']}₽ | {plan['links_limit']} мониторингов | {plan['duration_days']} дней"
+            )
+        await message.answer("\n".join(lines))
+
+    @router.message(Command("status"))
+    async def cmd_status(message: Message) -> None:
+        status_code, payload = await backend.current_monitoring(bot_id=bot_id, telegram_id=message.from_user.id)
+        if status_code == 200:
+            await message.answer(_format_monitoring_status(payload))
+            return
+        await message.answer(f"Не удалось получить статус: {_extract_error(payload)}")
+
+    @router.message(Command("start_monitoring"))
+    async def cmd_start_monitoring(message: Message) -> None:
+        status_code, payload = await backend.start_monitoring(bot_id=bot_id, telegram_id=message.from_user.id)
+        if status_code == 200:
+            await message.answer(f"Мониторинг запущен.\n\n{_format_monitoring_status(payload)}")
+            return
+        await message.answer(f"Не удалось запустить: {_extract_error(payload)}")
+
+    @router.message(Command("stop_monitoring"))
+    async def cmd_stop_monitoring(message: Message) -> None:
+        status_code, payload = await backend.stop_monitoring(bot_id=bot_id, telegram_id=message.from_user.id)
+        if status_code == 200:
+            await message.answer(f"Мониторинг остановлен.\n\n{_format_monitoring_status(payload)}")
+            return
+        await message.answer(f"Не удалось остановить: {_extract_error(payload)}")
+
+    @router.message(Command("change_link"))
+    async def cmd_change_link(message: Message) -> None:
+        parts = (message.text or "").split(maxsplit=1)
+        if len(parts) < 2:
+            await message.answer("Использование: /change_link https://www.avito.ru/...")
+            return
+        url = parts[1].strip()
+        status_code, payload = await backend.change_link(
+            bot_id=bot_id,
+            telegram_id=message.from_user.id,
+            url=url,
+        )
+        if status_code == 200:
+            await message.answer(
+                "Ссылка обновлена.\n"
+                f"{_format_monitoring_status(payload)}\n\n"
+                "Для запуска используйте /start_monitoring"
+            )
+            return
+        await message.answer(f"Не удалось изменить ссылку: {_extract_error(payload)}")
+
+    @router.message(Command("miniapp"))
+    async def cmd_miniapp(message: Message) -> None:
+        await message.answer("Откройте miniapp", reply_markup=miniapp_keyboard())
+
+    return router
 
 
-@router.message(Command("my_links"))
-async def cmd_my_links(message: Message) -> None:
-    tg_id = message.from_user.id
-    monitorings = await backend.list_monitorings(tg_id)
-    if not monitorings:
-        await message.answer("У вас пока нет активных ссылок. Добавьте через /add_link или miniapp.")
-        return
-
-    lines = ["Ваши ссылки мониторинга:"]
-    for m in monitorings:
-        lines.append(f"• #{m['id']} {m.get('title') or '-'}\n{m['url']}")
-    await message.answer("\n\n".join(lines))
+@dataclass
+class BotRuntime:
+    bot_id: int
+    token: str
+    bot: Bot
+    dispatcher: Dispatcher
+    task: asyncio.Task[None]
 
 
-@router.message(Command("add_link"))
-async def cmd_add_link(message: Message) -> None:
-    parts = (message.text or "").split(maxsplit=1)
-    if len(parts) < 2:
-        await message.answer("Использование: /add_link https://www.avito.ru/...")
-        return
+class MultiBotManager:
+    def __init__(self, backend: BackendAPI) -> None:
+        self.backend = backend
+        self.runtimes: dict[int, BotRuntime] = {}
 
-    url = parts[1].strip()
-    status_code, payload = await backend.add_monitoring(message.from_user.id, url)
-    if status_code == 200:
-        await message.answer(f"Ссылка добавлена в мониторинг: #{payload['id']}")
-        return
+    async def start_bot(self, config: dict[str, Any]) -> None:
+        bot_id = int(config["id"])
+        token = str(config.get("bot_token", "")).strip()
+        if not has_valid_bot_token(token):
+            logger.error(f"Bot #{bot_id} has invalid token, skipping")
+            return
 
-    error_message = payload.get("detail") if isinstance(payload, dict) else str(payload)
-    await message.answer(f"Не удалось добавить ссылку: {error_message}")
+        bot = Bot(token=token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+        try:
+            me = await bot.get_me()
+            await self.backend.sync_bot_metadata(bot_id=bot_id, telegram_bot_id=me.id, bot_username=me.username)
+            await bot.set_my_commands(
+                [
+                    BotCommand(command="start_monitoring", description="Запустить мониторинг"),
+                    BotCommand(command="stop_monitoring", description="Остановить мониторинг"),
+                    BotCommand(command="change_link", description="Поменять ссылку"),
+                    BotCommand(command="status", description="Статус мониторинга"),
+                    BotCommand(command="miniapp", description="Открыть miniapp"),
+                ]
+            )
+        except Exception as exc:
+            logger.error(f"Failed to initialize bot #{bot_id}: {exc}")
+            await bot.session.close()
+            return
+
+        dispatcher = Dispatcher()
+        dispatcher.include_router(build_router(bot_id=bot_id, backend=self.backend))
+        task = asyncio.create_task(dispatcher.start_polling(bot))
+        self.runtimes[bot_id] = BotRuntime(
+            bot_id=bot_id,
+            token=token,
+            bot=bot,
+            dispatcher=dispatcher,
+            task=task,
+        )
+        logger.info(f"Started polling for bot #{bot_id} (@{me.username or 'unknown'})")
+
+    async def stop_bot(self, bot_id: int) -> None:
+        runtime = self.runtimes.pop(bot_id, None)
+        if not runtime:
+            return
+        with suppress(Exception):
+            await runtime.dispatcher.stop_polling()
+        runtime.task.cancel()
+        with suppress(asyncio.CancelledError):
+            await runtime.task
+        await runtime.bot.session.close()
+        logger.info(f"Stopped bot #{bot_id}")
+
+    async def sync_bots(self) -> None:
+        try:
+            active_configs = await self.backend.active_bots()
+        except Exception as exc:
+            logger.error(f"Failed to fetch active bots: {exc}")
+            return
+
+        incoming: dict[int, dict[str, Any]] = {}
+        for cfg in active_configs:
+            try:
+                incoming[int(cfg["id"])] = cfg
+            except Exception:
+                continue
+
+        for bot_id in list(self.runtimes.keys()):
+            runtime = self.runtimes.get(bot_id)
+            if not runtime:
+                continue
+            if bot_id not in incoming:
+                await self.stop_bot(bot_id)
+                continue
+
+            new_token = str(incoming[bot_id].get("bot_token", "")).strip()
+            if runtime.task.done() or runtime.token != new_token:
+                await self.stop_bot(bot_id)
+
+        for bot_id, cfg in incoming.items():
+            if bot_id not in self.runtimes:
+                await self.start_bot(cfg)
+
+    async def close(self) -> None:
+        for bot_id in list(self.runtimes.keys()):
+            await self.stop_bot(bot_id)
 
 
-@router.message(Command("miniapp"))
-async def cmd_miniapp(message: Message) -> None:
-    await message.answer("Откройте miniapp", reply_markup=miniapp_keyboard(message.from_user.id))
+async def bots_sync_loop(manager: MultiBotManager, stop_event: asyncio.Event) -> None:
+    while not stop_event.is_set():
+        await manager.sync_bots()
+        await asyncio.sleep(BOTS_REFRESH_SEC)
 
 
-async def notifications_loop(bot: Bot, stop_event: asyncio.Event) -> None:
+async def notifications_loop(manager: MultiBotManager, backend: BackendAPI, stop_event: asyncio.Event) -> None:
     while not stop_event.is_set():
         try:
             notifications = await backend.pending_notifications(limit=100)
-            for n in notifications:
+            for notification in notifications:
+                bot_id = int(notification.get("bot_id") or 0)
+                runtime = manager.runtimes.get(bot_id)
+                if not runtime:
+                    continue
                 try:
-                    await bot.send_message(
-                        chat_id=n["telegram_id"],
-                        text=n["message"],
+                    await runtime.bot.send_message(
+                        chat_id=notification["telegram_id"],
+                        text=notification["message"],
                         disable_web_page_preview=True,
                     )
-                    await backend.mark_notification_sent(n["id"])
+                    await backend.mark_notification_sent(notification["id"])
                 except Exception as exc:
-                    logger.warning(f"Failed to deliver notification id={n.get('id')}: {exc}")
+                    logger.warning(f"Failed to deliver notification id={notification.get('id')}: {exc}")
         except Exception as exc:
-            logger.error(f"notifications loop failed: {exc}")
+            logger.error(f"Notifications loop failed: {exc}")
 
-        await asyncio.sleep(4)
+        await asyncio.sleep(NOTIFY_POLL_SEC)
 
 
 async def main() -> None:
-    if not has_valid_bot_token(BOT_TOKEN):
-        logger.error("BOT_TOKEN is invalid or empty. Set real token in .env, then restart bot container.")
-        while True:
-            await asyncio.sleep(3600)
-
-    bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-    dp = Dispatcher()
-    dp.include_router(router)
-
+    backend = BackendAPI()
+    manager = MultiBotManager(backend=backend)
     stop_event = asyncio.Event()
-    notify_task = asyncio.create_task(notifications_loop(bot, stop_event))
+
+    sync_task = asyncio.create_task(bots_sync_loop(manager=manager, stop_event=stop_event))
+    notify_task = asyncio.create_task(notifications_loop(manager=manager, backend=backend, stop_event=stop_event))
 
     try:
-        await dp.start_polling(bot)
+        await asyncio.gather(sync_task, notify_task)
     finally:
         stop_event.set()
+        sync_task.cancel()
         notify_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await sync_task
+        with suppress(asyncio.CancelledError):
+            await notify_task
+        await manager.close()
         await backend.close()
-        await bot.session.close()
 
 
 if __name__ == "__main__":

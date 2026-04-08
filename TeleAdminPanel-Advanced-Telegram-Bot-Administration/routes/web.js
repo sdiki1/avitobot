@@ -16,13 +16,14 @@ function withAdminBase(path) {
 
 router.get('/', async (req, res) => {
   try {
-    const [stats, plans, proxies] = await Promise.all([api.getStats(), api.getPlans(), api.getProxies()]);
-    res.render('dashboard', { stats, plans, proxies, error: null, success: req.query.success || null });
+    const [stats, plans, proxies, bots] = await Promise.all([api.getStats(), api.getPlans(), api.getProxies(), api.getBots()]);
+    res.render('dashboard', { stats, plans, proxies, bots, error: null, success: req.query.success || null });
   } catch (error) {
     res.render('dashboard', {
-      stats: { users_count: 0, active_monitorings: 0, active_subscriptions: 0, payments_total_rub: 0 },
+      stats: { users_count: 0, active_monitorings: 0, active_subscriptions: 0, payments_total_rub: 0, active_bots: 0 },
       plans: [],
       proxies: [],
+      bots: [],
       error: error.message,
       success: null,
     });
@@ -140,6 +141,54 @@ router.get('/monitorings', async (req, res) => {
     res.render('monitorings', { monitorings, error: null });
   } catch (error) {
     res.render('monitorings', { monitorings: [], error: error.message });
+  }
+});
+
+router.get('/bots', async (req, res) => {
+  try {
+    const bots = await api.getBots();
+    res.render('bots', { bots, error: null, success: req.query.success || null });
+  } catch (error) {
+    res.render('bots', { bots: [], error: error.message, success: null });
+  }
+});
+
+router.post('/bots', async (req, res) => {
+  try {
+    await api.createBot({
+      name: req.body.name,
+      bot_token: req.body.bot_token,
+      is_active: req.body.is_active === 'on',
+    });
+    res.redirect(withAdminBase('/bots?success=Бот+добавлен'));
+  } catch (error) {
+    res.redirect(withAdminBase(`/bots?success=${encodeURIComponent(`Ошибка: ${error.message}`)}`));
+  }
+});
+
+router.post('/bots/:id/update', async (req, res) => {
+  try {
+    const payload = {
+      name: req.body.name,
+      is_active: req.body.is_active === 'on',
+      bot_username: req.body.bot_username || null,
+    };
+    if (req.body.bot_token) {
+      payload.bot_token = req.body.bot_token;
+    }
+    await api.updateBot(req.params.id, payload);
+    res.redirect(withAdminBase('/bots?success=Бот+обновлен'));
+  } catch (error) {
+    res.redirect(withAdminBase(`/bots?success=${encodeURIComponent(`Ошибка: ${error.message}`)}`));
+  }
+});
+
+router.post('/bots/:id/delete', async (req, res) => {
+  try {
+    await api.deleteBot(req.params.id);
+    res.redirect(withAdminBase('/bots?success=Бот+удален'));
+  } catch (error) {
+    res.redirect(withAdminBase(`/bots?success=${encodeURIComponent(`Ошибка: ${error.message}`)}`));
   }
 });
 

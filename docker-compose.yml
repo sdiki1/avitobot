@@ -55,10 +55,11 @@ services:
     env_file:
       - .env
     environment:
-      BOT_TOKEN: ${BOT_TOKEN}
       BACKEND_URL: ${BACKEND_URL:-http://miniapp-backend:8000}
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-change_me_internal_token}
       MINIAPP_PUBLIC_URL: ${MINIAPP_PUBLIC_URL:-http://localhost}
+      BOTS_REFRESH_SEC: ${BOTS_REFRESH_SEC:-15}
+      NOTIFY_POLL_SEC: ${NOTIFY_POLL_SEC:-4}
     depends_on:
       miniapp-backend:
         condition: service_started

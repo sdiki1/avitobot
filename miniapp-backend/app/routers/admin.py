@@ -1,11 +1,9 @@
-from datetime import datetime
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import and_, desc, func, select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import Monitoring, Payment, ProxyConfig, TariffPlan, User, UserSubscription
+from app.models import Monitoring, Payment, ProxyConfig, TariffPlan, TelegramBot, User, UserSubscription
 from app.schemas import (
     ActivateSubscriptionRequest,
     PaymentCreate,
@@ -13,14 +11,36 @@ from app.schemas import (
     ProxyCreate,
     ProxyResponse,
     ProxyUpdate,
+    TelegramBotCreate,
+    TelegramBotResponse,
+    TelegramBotUpdate,
     TariffPlanCreate,
     TariffPlanResponse,
     TariffPlanUpdate,
 )
 from app.services.auth import require_admin_token
-from app.services.helpers import add_days, get_or_create_user, now_utc
+from app.services.helpers import activate_user_subscription, get_or_create_user, now_utc
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin_token)])
+
+
+def _build_bot_link(username: str | None) -> str | None:
+    if not username:
+        return None
+    return f"https://t.me/{username.lstrip('@')}"
+
+
+def _bot_to_schema(bot: TelegramBot) -> TelegramBotResponse:
+    return TelegramBotResponse(
+        id=bot.id,
+        name=bot.name,
+        is_active=bot.is_active,
+        telegram_bot_id=bot.telegram_bot_id,
+        bot_username=bot.bot_username,
+        bot_link=_build_bot_link(bot.bot_username),
+        created_at=bot.created_at,
+        updated_at=bot.updated_at,
+    )
 
 
 @router.get("/stats")
@@ -35,12 +55,14 @@ def stats(db: Session = Depends(get_db)) -> dict:
         )
     ) or 0
     payments_total = db.scalar(select(func.coalesce(func.sum(Payment.amount_rub), 0)).where(Payment.status == "completed")) or 0
+    active_bots = db.scalar(select(func.count(TelegramBot.id)).where(TelegramBot.is_active.is_(True))) or 0
 
     return {
         "users_count": users_count,
         "active_monitorings": active_monitorings,
         "active_subscriptions": active_subscriptions,
         "payments_total_rub": payments_total,
+        "active_bots": active_bots,
     }
 
 
@@ -70,18 +92,101 @@ def monitorings(db: Session = Depends(get_db)) -> list[dict]:
     rows = db.scalars(select(Monitoring).order_by(desc(Monitoring.created_at))).all()
     result = []
     for row in rows:
+        bot_name = row.bot.name if row.bot else None
+        bot_link = _build_bot_link(row.bot.bot_username) if row.bot else None
         result.append(
             {
                 "id": row.id,
                 "user_id": row.user_id,
+                "bot_id": row.bot_id,
+                "bot_name": bot_name,
+                "bot_link": bot_link,
                 "url": row.url,
                 "title": row.title,
                 "is_active": row.is_active,
+                "link_configured": row.link_configured,
                 "last_checked_at": row.last_checked_at,
                 "created_at": row.created_at,
             }
         )
     return result
+
+
+@router.get("/bots", response_model=list[TelegramBotResponse])
+def list_bots(db: Session = Depends(get_db)) -> list[TelegramBotResponse]:
+    bots = db.scalars(select(TelegramBot).order_by(TelegramBot.id.asc())).all()
+    return [_bot_to_schema(bot) for bot in bots]
+
+
+@router.post("/bots", response_model=TelegramBotResponse)
+def create_bot(payload: TelegramBotCreate, db: Session = Depends(get_db)) -> TelegramBotResponse:
+    existing_name = db.scalar(select(TelegramBot).where(TelegramBot.name == payload.name))
+    if existing_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Bot name already exists")
+
+    existing_token = db.scalar(select(TelegramBot).where(TelegramBot.bot_token == payload.bot_token))
+    if existing_token:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Bot token already exists")
+
+    bot = TelegramBot(
+        name=payload.name.strip(),
+        bot_token=payload.bot_token.strip(),
+        is_active=payload.is_active,
+    )
+    db.add(bot)
+    db.commit()
+    db.refresh(bot)
+    return _bot_to_schema(bot)
+
+
+@router.put("/bots/{bot_id}", response_model=TelegramBotResponse)
+def update_bot(bot_id: int, payload: TelegramBotUpdate, db: Session = Depends(get_db)) -> TelegramBotResponse:
+    bot = db.get(TelegramBot, bot_id)
+    if not bot:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bot not found")
+
+    if payload.name is not None:
+        existing_name = db.scalar(select(TelegramBot).where(and_(TelegramBot.name == payload.name, TelegramBot.id != bot_id)))
+        if existing_name:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Bot name already exists")
+        bot.name = payload.name.strip()
+
+    if payload.bot_token is not None:
+        token = payload.bot_token.strip()
+        existing_token = db.scalar(select(TelegramBot).where(and_(TelegramBot.bot_token == token, TelegramBot.id != bot_id)))
+        if existing_token:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Bot token already exists")
+        bot.bot_token = token
+
+    if payload.telegram_bot_id is not None:
+        existing_telegram_id = db.scalar(
+            select(TelegramBot).where(
+                and_(TelegramBot.telegram_bot_id == payload.telegram_bot_id, TelegramBot.id != bot_id)
+            )
+        )
+        if existing_telegram_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="telegram_bot_id already exists")
+        bot.telegram_bot_id = payload.telegram_bot_id
+
+    if payload.bot_username is not None:
+        bot.bot_username = payload.bot_username.strip().lstrip("@") or None
+
+    if payload.is_active is not None:
+        bot.is_active = payload.is_active
+
+    db.commit()
+    db.refresh(bot)
+    return _bot_to_schema(bot)
+
+
+@router.delete("/bots/{bot_id}")
+def delete_bot(bot_id: int, db: Session = Depends(get_db)) -> dict:
+    bot = db.get(TelegramBot, bot_id)
+    if not bot:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bot not found")
+    db.delete(bot)
+    db.commit()
+    return {"ok": True}
 
 
 @router.get("/plans", response_model=list[TariffPlanResponse])
@@ -185,28 +290,7 @@ def activate_subscription(payload: ActivateSubscriptionRequest, db: Session = De
     plan = db.get(TariffPlan, payload.plan_id)
     if not plan:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
-
-    # Закрываем предыдущую активную подписку
-    active_sub = db.scalar(
-        select(UserSubscription)
-        .where(and_(UserSubscription.user_id == user.id, UserSubscription.status == "active", UserSubscription.ends_at > now_utc()))
-        .order_by(UserSubscription.ends_at.desc())
-    )
-    if active_sub:
-        active_sub.status = "expired"
-
-    started = now_utc()
-    new_sub = UserSubscription(
-        user_id=user.id,
-        plan_id=plan.id,
-        status="active",
-        amount_paid=plan.price_rub,
-        started_at=started,
-        ends_at=add_days(started, plan.duration_days),
-    )
-    db.add(new_sub)
-    db.commit()
-    db.refresh(new_sub)
+    new_sub = activate_user_subscription(db, user.id, plan)
 
     return {
         "ok": True,

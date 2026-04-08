@@ -11,6 +11,7 @@
         <tr>
           <th>ID</th>
           <th>User ID</th>
+          <th>Бот</th>
           <th>Название / URL</th>
           <th>Последняя проверка</th>
           <th>Статус</th>
@@ -22,6 +23,18 @@
           <td><strong><%= m.id %></strong></td>
           <td><%= m.user_id %></td>
           <td>
+            <% if (m.bot_id) { %>
+              <div class="user-meta">
+                <strong>#<%= m.bot_id %> <%= m.bot_name || 'Без имени' %></strong>
+                <% if (m.bot_link) { %>
+                  <a href="<%= m.bot_link %>" target="_blank" rel="noreferrer"><%= m.bot_link %></a>
+                <% } %>
+              </div>
+            <% } else { %>
+              —
+            <% } %>
+          </td>
+          <td>
             <div class="user-meta">
               <strong><%= m.title || `Мониторинг #${m.id}` %></strong>
               <span class="monitoring-url"><%= m.url %></span>
@@ -32,6 +45,9 @@
             <span class="badge <%= m.is_active ? 'active' : 'disabled' %>">
               <%= m.is_active ? 'active' : 'disabled' %>
             </span>
+            <% if (!m.link_configured) { %>
+              <span class="badge pending">no-link</span>
+            <% } %>
           </td>
         </tr>
       <% }) %>
