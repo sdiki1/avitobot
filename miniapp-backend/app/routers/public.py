@@ -132,9 +132,21 @@ def profile(telegram_id: int = Query(...), db: Session = Depends(get_db)) -> dic
     )
     referral_bot = db.scalar(
         select(TelegramBot)
-        .where(and_(TelegramBot.is_active.is_(True), TelegramBot.bot_username.is_not(None)))
+        .where(
+            and_(
+                TelegramBot.is_active.is_(True),
+                TelegramBot.bot_username.is_not(None),
+                TelegramBot.is_primary.is_(True),
+            )
+        )
         .order_by(TelegramBot.id.asc())
     )
+    if not referral_bot:
+        referral_bot = db.scalar(
+            select(TelegramBot)
+            .where(and_(TelegramBot.is_active.is_(True), TelegramBot.bot_username.is_not(None)))
+            .order_by(TelegramBot.id.asc())
+        )
     referral_link = None
     if referral_bot and user.referral_code:
         base = _build_bot_link(referral_bot.bot_username)

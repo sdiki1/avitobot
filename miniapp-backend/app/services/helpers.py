@@ -108,7 +108,16 @@ def activate_user_subscription(db: Session, user_id: int, plan: TariffPlan) -> U
 
 
 def get_available_bot_for_user(db: Session, user_id: int) -> TelegramBot | None:
-    bots = db.scalars(select(TelegramBot).where(TelegramBot.is_active.is_(True)).order_by(TelegramBot.id.asc())).all()
+    bots = db.scalars(
+        select(TelegramBot)
+        .where(
+            and_(
+                TelegramBot.is_active.is_(True),
+                TelegramBot.is_primary.is_(False),
+            )
+        )
+        .order_by(TelegramBot.id.asc())
+    ).all()
     if not bots:
         return None
 

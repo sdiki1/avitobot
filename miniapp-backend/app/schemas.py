@@ -29,6 +29,7 @@ class TelegramAuthResolveResponse(BaseModel):
 class TelegramBotBase(BaseModel):
     name: str = Field(min_length=2, max_length=255)
     is_active: bool = True
+    is_primary: bool = False
 
 
 class TelegramBotCreate(TelegramBotBase):
@@ -41,6 +42,7 @@ class TelegramBotUpdate(BaseModel):
     telegram_bot_id: int | None = None
     bot_username: str | None = None
     is_active: bool | None = None
+    is_primary: bool | None = None
 
 
 class TelegramBotResponse(TelegramBotBase):

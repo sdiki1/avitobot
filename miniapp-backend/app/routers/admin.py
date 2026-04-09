@@ -35,12 +35,28 @@ def _bot_to_schema(bot: TelegramBot) -> TelegramBotResponse:
         id=bot.id,
         name=bot.name,
         is_active=bot.is_active,
+        is_primary=bot.is_primary,
         telegram_bot_id=bot.telegram_bot_id,
         bot_username=bot.bot_username,
         bot_link=_build_bot_link(bot.bot_username),
         created_at=bot.created_at,
         updated_at=bot.updated_at,
     )
+
+
+def _set_primary_bot(db: Session, target_bot_id: int) -> None:
+    bots = db.scalars(select(TelegramBot).order_by(TelegramBot.id.asc())).all()
+    for bot in bots:
+        bot.is_primary = bot.id == target_bot_id
+
+
+def _ensure_primary_bot_exists(db: Session) -> None:
+    existing_primary = db.scalar(select(TelegramBot).where(TelegramBot.is_primary.is_(True)))
+    if existing_primary:
+        return
+    first_bot = db.scalar(select(TelegramBot).order_by(TelegramBot.id.asc()))
+    if first_bot:
+        first_bot.is_primary = True
 
 
 @router.get("/stats")
@@ -132,8 +148,14 @@ def create_bot(payload: TelegramBotCreate, db: Session = Depends(get_db)) -> Tel
         name=payload.name.strip(),
         bot_token=payload.bot_token.strip(),
         is_active=payload.is_active,
+        is_primary=payload.is_primary,
     )
     db.add(bot)
+    db.flush()
+    if payload.is_primary:
+        _set_primary_bot(db, bot.id)
+    else:
+        _ensure_primary_bot_exists(db)
     db.commit()
     db.refresh(bot)
     return _bot_to_schema(bot)
@@ -174,6 +196,13 @@ def update_bot(bot_id: int, payload: TelegramBotUpdate, db: Session = Depends(ge
     if payload.is_active is not None:
         bot.is_active = payload.is_active
 
+    if payload.is_primary is not None:
+        if payload.is_primary:
+            _set_primary_bot(db, bot.id)
+        else:
+            bot.is_primary = False
+            _ensure_primary_bot_exists(db)
+
     db.commit()
     db.refresh(bot)
     return _bot_to_schema(bot)
@@ -184,7 +213,11 @@ def delete_bot(bot_id: int, db: Session = Depends(get_db)) -> dict:
     bot = db.get(TelegramBot, bot_id)
     if not bot:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bot not found")
+    deleting_primary = bot.is_primary
     db.delete(bot)
+    db.flush()
+    if deleting_primary:
+        _ensure_primary_bot_exists(db)
     db.commit()
     return {"ok": True}
 

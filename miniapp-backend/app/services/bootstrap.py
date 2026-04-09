@@ -53,6 +53,15 @@ def init_db() -> None:
         )
         conn.exec_driver_sql("UPDATE monitorings SET link_configured = FALSE WHERE link_configured IS NULL")
 
+        conn.exec_driver_sql("ALTER TABLE telegram_bots ADD COLUMN IF NOT EXISTS is_primary BOOLEAN DEFAULT FALSE")
+        conn.exec_driver_sql("UPDATE telegram_bots SET is_primary = FALSE WHERE is_primary IS NULL")
+        conn.exec_driver_sql(
+            "WITH first_bot AS (SELECT id FROM telegram_bots ORDER BY id ASC LIMIT 1) "
+            "UPDATE telegram_bots SET is_primary = TRUE "
+            "WHERE id = (SELECT id FROM first_bot) "
+            "AND NOT EXISTS (SELECT 1 FROM telegram_bots WHERE is_primary IS TRUE)"
+        )
+
 
 def seed_default_plans(db: Session) -> None:
     for plan in DEFAULT_PLANS:
@@ -70,6 +79,7 @@ def seed_default_plans(db: Session) -> None:
                     name=settings.default_bot_name,
                     bot_token=default_token,
                     is_active=True,
+                    is_primary=True,
                 )
             )
     db.commit()

@@ -159,6 +159,7 @@ router.post('/bots', async (req, res) => {
       name: req.body.name,
       bot_token: req.body.bot_token,
       is_active: req.body.is_active === 'on',
+      is_primary: req.body.is_primary === 'on',
     });
     res.redirect(withAdminBase('/bots?success=Бот+добавлен'));
   } catch (error) {
@@ -172,6 +173,7 @@ router.post('/bots/:id/update', async (req, res) => {
       name: req.body.name,
       is_active: req.body.is_active === 'on',
       bot_username: req.body.bot_username || null,
+      is_primary: req.body.is_primary === 'on',
     };
     if (req.body.bot_token) {
       payload.bot_token = req.body.bot_token;

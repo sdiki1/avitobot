@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   authTelegramUser,
+  getMonitorings,
   getPlans,
   getProfile,
   purchaseSubscription,
@@ -35,6 +36,26 @@ function formatDate(value) {
   return new Date(value).toLocaleString('ru-RU')
 }
 
+function formatBotLabel(bot) {
+  if (!bot) return 'Бот не назначен'
+  const username = bot.bot_username
+    ? (bot.bot_username.startsWith('@') ? bot.bot_username : `@${bot.bot_username}`)
+    : null
+  if (!username) return bot.name
+  return `${bot.name} (${username})`
+}
+
+function CopyIcon() {
+  return (
+    <svg className="copy-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M8 8h10v12H8zM6 4h10v2H8v10H6z"
+        fill="currentColor"
+      />
+    </svg>
+  )
+}
+
 export default function App() {
   const [tab, setTab] = useState(TABS.subscriptions)
   const [subscriptionView, setSubscriptionView] = useState(SUBSCRIPTION_VIEW.home)
@@ -43,6 +64,7 @@ export default function App() {
   const [statusMessage, setStatusMessage] = useState('')
   const [plans, setPlans] = useState([])
   const [profile, setProfile] = useState(null)
+  const [monitorings, setMonitorings] = useState([])
   const [selectedPlanId, setSelectedPlanId] = useState('')
   const [purchaseBusy, setPurchaseBusy] = useState(false)
 
@@ -52,12 +74,14 @@ export default function App() {
   )
 
   const loadData = async (tgId) => {
-    const [profileData, plansData] = await Promise.all([
+    const [profileData, plansData, monitoringsData] = await Promise.all([
       getProfile(tgId),
       getPlans(),
+      getMonitorings(tgId),
     ])
     setProfile(profileData)
     setPlans(plansData)
+    setMonitorings(monitoringsData)
     if (!selectedPlanId && plansData.length > 0) {
       setSelectedPlanId(String(plansData[0].id))
     }
@@ -170,6 +194,31 @@ export default function App() {
             {subscriptionView === SUBSCRIPTION_VIEW.home && (
               <article className="card subscription-home">
                 <h2>Подписки</h2>
+                <p className="muted">
+                  Текущая подписка:{' '}
+                  {profile?.subscription
+                    ? `${profile.subscription.plan_name} до ${formatDate(profile.subscription.ends_at)}`
+                    : 'нет'}
+                </p>
+                <div className="monitorings">
+                  {monitorings.length === 0 && (
+                    <div className="empty">У вас пока нет активных подписок на мониторинг.</div>
+                  )}
+                  {monitorings.map((monitoring) => (
+                    <div className="monitoring-item" key={monitoring.id}>
+                      <div>
+                        <strong>{monitoring.title || `Мониторинг #${monitoring.id}`}</strong>
+                        <p>{monitoring.url}</p>
+                        <p>{formatBotLabel(monitoring.bot)}</p>
+                      </div>
+                      {monitoring.bot?.bot_link && (
+                        <a href={monitoring.bot.bot_link} target="_blank" rel="noreferrer" className="mini-link">
+                          Открыть бота
+                        </a>
+                      )}
+                    </div>
+                  ))}
+                </div>
                 <button
                   type="button"
                   className="subscription-primary-btn"
@@ -244,12 +293,14 @@ export default function App() {
                     <strong>{profile?.user?.telegram_id || telegramId || '—'}</strong>
                     <button
                       type="button"
-                      className="text-btn"
+                      className="icon-btn"
+                      aria-label="Скопировать Telegram ID"
+                      title="Скопировать Telegram ID"
                       onClick={() =>
                         copyText(String(profile?.user?.telegram_id || telegramId || ''), 'Telegram ID скопирован')
                       }
                     >
-                      Копировать
+                      <CopyIcon />
                     </button>
                   </div>
                 </div>
@@ -259,7 +310,9 @@ export default function App() {
                     <strong>{profile?.referral_link || profile?.user?.referral_code || '—'}</strong>
                     <button
                       type="button"
-                      className="text-btn"
+                      className="icon-btn"
+                      aria-label="Скопировать реферальную ссылку"
+                      title="Скопировать реферальную ссылку"
                       onClick={() =>
                         copyText(
                           profile?.referral_link || profile?.user?.referral_code || '',
@@ -267,7 +320,7 @@ export default function App() {
                         )
                       }
                     >
-                      Копировать
+                      <CopyIcon />
                     </button>
                   </div>
                 </div>

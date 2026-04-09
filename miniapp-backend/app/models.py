@@ -39,6 +39,7 @@ class TelegramBot(Base):
     telegram_bot_id: Mapped[int | None] = mapped_column(BigInteger, unique=True, nullable=True)
     bot_username: Mapped[str | None] = mapped_column(String(255), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_primary: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

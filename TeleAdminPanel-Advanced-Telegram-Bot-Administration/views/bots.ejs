@@ -19,6 +19,10 @@
       <input name="is_active" type="checkbox" checked />
       Активен
     </label>
+    <label>
+      <input name="is_primary" type="checkbox" />
+      Основной (админ)
+    </label>
     <button type="submit">Добавить</button>
   </form>
 </section>
@@ -60,6 +64,13 @@
                 <input name="is_active" type="checkbox" <%= bot.is_active ? 'checked' : '' %> />
                 Активен
               </label>
+              <label>
+                <input name="is_primary" type="checkbox" <%= bot.is_primary ? 'checked' : '' %> />
+                Основной (админ)
+              </label>
+              <% if (bot.is_primary) { %>
+                <span class="badge pending">PRIMARY</span>
+              <% } %>
               <div class="actions">
                 <button type="submit">Сохранить</button>
                 <button type="submit" class="danger" formaction="<%= adminBase %>/bots/<%= bot.id %>/delete">Удалить</button>

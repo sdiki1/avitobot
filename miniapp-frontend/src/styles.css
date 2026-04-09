@@ -308,13 +308,9 @@ h2 {
   word-break: break-all;
 }
 
-.text-btn {
-  border: 0;
-  background: transparent;
-  color: #c9c9c9;
-  cursor: pointer;
-  font-size: 12px;
-  padding: 2px 0 0;
+.copy-icon {
+  width: 16px;
+  height: 16px;
 }
 
 input,
@@ -346,6 +342,24 @@ button {
 button:disabled {
   opacity: 0.55;
   cursor: default;
+}
+
+button.icon-btn {
+  border: 1px solid var(--line);
+  background: #101010;
+  color: #d8d8d8;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+button.icon-btn:hover {
+  border-color: rgba(255, 255, 255, 0.35);
+  background: #101010;
 }
 
 .bottom-nav {
