@@ -25,6 +25,7 @@ from app.services.helpers import (
     get_available_bot_for_user,
     get_or_create_user,
     parse_miniapp_auth_token,
+    send_subscription_assigned_bot_message,
 )
 
 router = APIRouter(prefix="/public", tags=["public"])
@@ -267,6 +268,7 @@ def purchase_subscription(
     )
     db.add(payment)
     subscription = activate_user_subscription(db, user.id, plan)
+    send_subscription_assigned_bot_message(db, user)
     return PurchaseSubscriptionResponse(
         ok=True,
         subscription_id=subscription.id,

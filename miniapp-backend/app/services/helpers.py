@@ -1,12 +1,17 @@
 from datetime import datetime, timedelta, timezone
 import hashlib
 import hmac
+import json
+import logging
+from urllib import request as urllib_request
 
 from sqlalchemy import Select, and_, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import Monitoring, TariffPlan, TelegramBot, User, UserSubscription
+
+logger = logging.getLogger(__name__)
 
 
 def now_utc() -> datetime:
@@ -132,6 +137,65 @@ def get_available_bot_for_user(db: Session, user_id: int) -> TelegramBot | None:
         if bot.id not in used_bot_ids:
             return bot
     return None
+
+
+def _send_telegram_message(bot_token: str, chat_id: int, text: str) -> bool:
+    payload = json.dumps(
+        {
+            "chat_id": chat_id,
+            "text": text,
+            "disable_web_page_preview": True,
+        }
+    ).encode("utf-8")
+    req = urllib_request.Request(
+        f"https://api.telegram.org/bot{bot_token}/sendMessage",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib_request.urlopen(req, timeout=10) as response:
+            return 200 <= response.status < 300
+    except Exception as exc:
+        logger.warning("Failed to send telegram message: %s", exc)
+        return False
+
+
+def send_subscription_assigned_bot_message(db: Session, user: User) -> bool:
+    primary_bot = db.scalar(
+        select(TelegramBot)
+        .where(and_(TelegramBot.is_primary.is_(True), TelegramBot.is_active.is_(True)))
+        .order_by(TelegramBot.id.asc())
+    )
+    if not primary_bot:
+        primary_bot = db.scalar(select(TelegramBot).where(TelegramBot.is_active.is_(True)).order_by(TelegramBot.id.asc()))
+    if not primary_bot:
+        return False
+
+    assigned_bot = db.scalar(
+        select(TelegramBot)
+        .join(Monitoring, Monitoring.bot_id == TelegramBot.id)
+        .where(
+            and_(
+                Monitoring.user_id == user.id,
+                TelegramBot.is_primary.is_(False),
+                TelegramBot.is_active.is_(True),
+            )
+        )
+        .order_by(Monitoring.id.asc())
+    )
+    if not assigned_bot:
+        assigned_bot = get_available_bot_for_user(db, user.id)
+    if not assigned_bot:
+        return False
+
+    nickname = assigned_bot.bot_username or assigned_bot.name
+    nickname = nickname.lstrip("@")
+    text = (
+        f"Вам назначен бот: @{nickname}. "
+        "Перейдите в него и можете начинать работу с мониторингом"
+    )
+    return _send_telegram_message(primary_bot.bot_token, user.telegram_id, text)
 
 
 def seconds_to_human(delta_seconds: int) -> str:
