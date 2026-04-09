@@ -1,10 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   authTelegramUser,
-  getMonitorings,
   getPlans,
   getProfile,
-  purchaseMonitoring,
   purchaseSubscription,
   resolveAuthToken,
 } from './api'
@@ -13,6 +11,11 @@ const TABS = {
   info: 'info',
   subscriptions: 'subscriptions',
   profile: 'profile',
+}
+
+const SUBSCRIPTION_VIEW = {
+  home: 'home',
+  buy: 'buy',
 }
 
 function telegramUser() {
@@ -32,32 +35,16 @@ function formatDate(value) {
   return new Date(value).toLocaleString('ru-RU')
 }
 
-function formatUsername(bot) {
-  if (!bot?.bot_username) return null
-  return bot.bot_username.startsWith('@') ? bot.bot_username : `@${bot.bot_username}`
-}
-
-function statusClass(monitoring) {
-  if (!monitoring.link_configured) return 'badge neutral'
-  return monitoring.is_active ? 'badge active' : 'badge stopped'
-}
-
-function monitoringStatusText(monitoring) {
-  if (!monitoring.link_configured) return 'link required'
-  return monitoring.is_active ? 'running' : 'stopped'
-}
-
 export default function App() {
   const [tab, setTab] = useState(TABS.subscriptions)
+  const [subscriptionView, setSubscriptionView] = useState(SUBSCRIPTION_VIEW.home)
   const [telegramId, setTelegramId] = useState(null)
   const [loading, setLoading] = useState(true)
   const [statusMessage, setStatusMessage] = useState('')
   const [plans, setPlans] = useState([])
   const [profile, setProfile] = useState(null)
-  const [monitorings, setMonitorings] = useState([])
   const [selectedPlanId, setSelectedPlanId] = useState('')
   const [purchaseBusy, setPurchaseBusy] = useState(false)
-  const [monitoringBusy, setMonitoringBusy] = useState(false)
 
   const activePlan = useMemo(
     () => plans.find((plan) => plan.id === Number(selectedPlanId)) || null,
@@ -65,14 +52,12 @@ export default function App() {
   )
 
   const loadData = async (tgId) => {
-    const [profileData, plansData, monitoringsData] = await Promise.all([
+    const [profileData, plansData] = await Promise.all([
       getProfile(tgId),
       getPlans(),
-      getMonitorings(tgId),
     ])
     setProfile(profileData)
     setPlans(plansData)
-    setMonitorings(monitoringsData)
     if (!selectedPlanId && plansData.length > 0) {
       setSelectedPlanId(String(plansData[0].id))
     }
@@ -142,27 +127,6 @@ export default function App() {
     }
   }
 
-  const onBuyMonitoring = async () => {
-    if (!telegramId || monitoringBusy) return
-    try {
-      setMonitoringBusy(true)
-      const monitoring = await purchaseMonitoring({
-        telegram_id: telegramId,
-      })
-      await loadData(telegramId)
-      if (monitoring?.bot?.bot_link) {
-        setStatusMessage(`Мониторинг куплен. Откройте ${monitoring.bot.bot_link}`)
-      } else {
-        setStatusMessage('Мониторинг куплен. Бот привязан, ссылка появится после синхронизации.')
-      }
-    } catch (error) {
-      const detail = error?.response?.data?.detail || error?.message || 'Ошибка покупки мониторинга'
-      setStatusMessage(`Ошибка: ${detail}`)
-    } finally {
-      setMonitoringBusy(false)
-    }
-  }
-
   const copyText = async (value, okMessage) => {
     if (!value) return
     try {
@@ -203,81 +167,69 @@ export default function App() {
 
         {!loading && tab === TABS.subscriptions && (
           <section className="stack">
-            <article className="card">
-              <h2>Активные боты</h2>
-              <p className="muted">
-                На каждый купленный мониторинг назначается отдельный бот для вашего аккаунта.
-              </p>
-              <div className="monitorings">
-                {monitorings.length === 0 && (
-                  <div className="empty">У вас пока нет купленных мониторингов.</div>
-                )}
-                {monitorings.map((monitoring) => (
-                  <div className="monitoring-item" key={monitoring.id}>
-                    <div>
-                      <strong>{monitoring.title || `Мониторинг #${monitoring.id}`}</strong>
-                      <p>{monitoring.url}</p>
-                      <p>
-                        Бот: {monitoring.bot?.name || 'не назначен'}
-                        {formatUsername(monitoring.bot) ? ` (${formatUsername(monitoring.bot)})` : ''}
-                      </p>
-                    </div>
-                    <div className="monitoring-side">
-                      <span className={statusClass(monitoring)}>{monitoringStatusText(monitoring)}</span>
-                      {monitoring.bot?.bot_link && (
-                        <a href={monitoring.bot.bot_link} target="_blank" rel="noreferrer" className="mini-link">
-                          Открыть бота
-                        </a>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </article>
-
-            <article className="card">
-              <h2>Подписки</h2>
-              <p className="muted">
-                Активная подписка:{' '}
-                {profile?.subscription
-                  ? `${profile.subscription.plan_name} до ${formatDate(profile.subscription.ends_at)}`
-                  : 'нет'}
-              </p>
-              <div className="buy-row">
-                <select
-                  value={selectedPlanId}
-                  onChange={(event) => setSelectedPlanId(event.target.value)}
+            {subscriptionView === SUBSCRIPTION_VIEW.home && (
+              <article className="card subscription-home">
+                <h2>Подписки</h2>
+                <button
+                  type="button"
+                  className="subscription-primary-btn"
+                  onClick={() => setSubscriptionView(SUBSCRIPTION_VIEW.buy)}
                 >
-                  {plans.map((plan) => (
-                    <option key={plan.id} value={plan.id}>
-                      {plan.name} • {plan.price_rub} ₽
-                    </option>
-                  ))}
-                </select>
-                <button type="button" onClick={onBuySubscription} disabled={!selectedPlanId || purchaseBusy}>
-                  {purchaseBusy ? 'Покупка...' : 'Купить подписку'}
+                  Купить подписку
                 </button>
-              </div>
-              <div className="plans-list">
-                {plans.map((plan) => (
-                  <div key={plan.id} className="plan">
-                    <strong>{plan.name}</strong>
-                    <span>{plan.links_limit} мониторингов • {plan.duration_days} дней</span>
-                    <span>{plan.price_rub} ₽</span>
-                  </div>
-                ))}
-              </div>
-            </article>
+              </article>
+            )}
 
-            <article className="card">
-              <h2>Купить мониторинг</h2>
-              <p className="muted">
-                После покупки вы получите бота под новый мониторинг. Управление ссылкой/запуском выполняется в самом боте.
-              </p>
-              <button type="button" onClick={onBuyMonitoring} disabled={monitoringBusy}>
-                {monitoringBusy ? 'Оформление...' : 'Купить мониторинг'}
-              </button>
-            </article>
+            {subscriptionView === SUBSCRIPTION_VIEW.buy && (
+              <>
+                <article className="card">
+                  <div className="section-head">
+                    <button
+                      type="button"
+                      className="section-back-btn"
+                      onClick={() => setSubscriptionView(SUBSCRIPTION_VIEW.home)}
+                    >
+                      Назад
+                    </button>
+                    <h2>Выбор тарифа</h2>
+                  </div>
+                  <p className="muted">
+                    Активная подписка:{' '}
+                    {profile?.subscription
+                      ? `${profile.subscription.plan_name} до ${formatDate(profile.subscription.ends_at)}`
+                      : 'нет'}
+                  </p>
+                  <div className="buy-row">
+                    <select
+                      value={selectedPlanId}
+                      onChange={(event) => setSelectedPlanId(event.target.value)}
+                    >
+                      {plans.map((plan) => (
+                        <option key={plan.id} value={plan.id}>
+                          {plan.name} • {plan.price_rub} ₽
+                        </option>
+                      ))}
+                    </select>
+                    <button type="button" onClick={onBuySubscription} disabled={!selectedPlanId || purchaseBusy}>
+                      {purchaseBusy ? 'Покупка...' : 'Купить подписку'}
+                    </button>
+                  </div>
+                </article>
+
+                <article className="card">
+                  <h2>Тарифы</h2>
+                  <div className="plans-list">
+                    {plans.map((plan) => (
+                      <div key={plan.id} className="plan">
+                        <strong>{plan.name}</strong>
+                        <span>{plan.links_limit} мониторингов • {plan.duration_days} дней</span>
+                        <span>{plan.price_rub} ₽</span>
+                      </div>
+                    ))}
+                  </div>
+                </article>
+              </>
+            )}
           </section>
         )}
 
@@ -342,7 +294,10 @@ export default function App() {
         <button
           type="button"
           className={tab === TABS.subscriptions ? 'tab active' : 'tab'}
-          onClick={() => setTab(TABS.subscriptions)}
+          onClick={() => {
+            setTab(TABS.subscriptions)
+            setSubscriptionView(SUBSCRIPTION_VIEW.home)
+          }}
         >
           Подписки
         </button>

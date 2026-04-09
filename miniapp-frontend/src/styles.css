@@ -226,6 +226,32 @@ h2 {
   margin-bottom: 12px;
 }
 
+.subscription-home {
+  min-height: 180px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 14px;
+}
+
+.subscription-primary-btn {
+  width: 100%;
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.section-back-btn {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--line);
+}
+
 .plans-list {
   display: grid;
   gap: 8px;
