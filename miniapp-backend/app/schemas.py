@@ -21,6 +21,11 @@ class UserResponse(BaseModel):
         from_attributes = True
 
 
+class TelegramAuthResolveResponse(BaseModel):
+    telegram_id: int
+    user: UserResponse
+
+
 class TelegramBotBase(BaseModel):
     name: str = Field(min_length=2, max_length=255)
     is_active: bool = True

@@ -6,6 +6,7 @@ import {
   getProfile,
   purchaseMonitoring,
   purchaseSubscription,
+  resolveAuthToken,
 } from './api'
 
 const TABS = {
@@ -20,6 +21,10 @@ function telegramUser() {
   tg.ready()
   tg.expand?.()
   return tg.initDataUnsafe?.user || null
+}
+
+function authTokenFromQuery() {
+  return new URLSearchParams(window.location.search).get('auth')
 }
 
 function formatDate(value) {
@@ -46,7 +51,7 @@ export default function App() {
   const [tab, setTab] = useState(TABS.subscriptions)
   const [telegramId, setTelegramId] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [statusMessage, setStatusMessage] = useState('Инициализация...')
+  const [statusMessage, setStatusMessage] = useState('')
   const [plans, setPlans] = useState([])
   const [profile, setProfile] = useState(null)
   const [monitorings, setMonitorings] = useState([])
@@ -76,22 +81,37 @@ export default function App() {
   useEffect(() => {
     const init = async () => {
       try {
+        let resolvedTelegramId = null
+        let authResolveFailed = false
+
+        const authToken = authTokenFromQuery()
+        if (authToken) {
+          try {
+            const resolved = await resolveAuthToken(authToken)
+            resolvedTelegramId = Number(resolved.telegram_id)
+          } catch {
+            authResolveFailed = true
+          }
+        }
+
         const user = telegramUser()
-        if (!user?.id) {
-          setStatusMessage('Откройте miniapp через Telegram-бота')
+        if (!resolvedTelegramId && user?.id) {
+          resolvedTelegramId = Number(user.id)
+          const fullName = [user.first_name, user.last_name].filter(Boolean).join(' ') || null
+          await authTelegramUser({
+            telegram_id: resolvedTelegramId,
+            username: user.username || null,
+            full_name: fullName,
+          })
+        }
+
+        if (!resolvedTelegramId) {
+          setStatusMessage(authResolveFailed ? 'Ошибка: ссылка авторизации недействительна' : 'Ошибка: нет данных авторизации')
           return
         }
-        const tgId = Number(user.id)
-        setTelegramId(tgId)
 
-        const fullName = [user.first_name, user.last_name].filter(Boolean).join(' ') || null
-        await authTelegramUser({
-          telegram_id: tgId,
-          username: user.username || null,
-          full_name: fullName,
-        })
-        await loadData(tgId)
-        setStatusMessage('Подключено')
+        setTelegramId(resolvedTelegramId)
+        await loadData(resolvedTelegramId)
       } catch (error) {
         const detail = error?.response?.data?.detail || error?.message || 'Ошибка инициализации'
         setStatusMessage(`Ошибка: ${detail}`)
@@ -157,18 +177,13 @@ export default function App() {
     <div className="app-shell">
       <div className="bg-layer" aria-hidden="true" />
       <main className="app-main">
-        <header className="hero">
-          <div>
-            <p className="eyebrow">Avito Monitor</p>
-            <h1>MiniApp Control</h1>
-            <p className="sub">
-              Управление подпиской и выдачей ботов. Вся работа по ссылке ведётся внутри назначенного бота.
-            </p>
-          </div>
-          <div className={`status ${statusMessage.startsWith('Ошибка') ? 'error' : ''}`}>
-            {loading ? 'Загрузка...' : statusMessage}
-          </div>
-        </header>
+        {!loading && statusMessage && (
+          <section className="card">
+            <div className={`status ${statusMessage.startsWith('Ошибка') ? 'error' : ''}`}>
+              {statusMessage}
+            </div>
+          </section>
+        )}
 
         {!loading && tab === TABS.info && (
           <section className="stack">

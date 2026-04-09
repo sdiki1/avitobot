@@ -26,6 +26,7 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://avito:avito@db:5432/avito_bot}
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-change_me_internal_token}
       ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:-change_me_admin_token}
+      MINIAPP_AUTH_SECRET: ${MINIAPP_AUTH_SECRET:-change_me_miniapp_auth_secret}
       CORS_ORIGINS: "*"
     depends_on:
       db:
@@ -58,6 +59,7 @@ services:
       BACKEND_URL: ${BACKEND_URL:-http://miniapp-backend:8000}
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-change_me_internal_token}
       MINIAPP_PUBLIC_URL: ${MINIAPP_PUBLIC_URL:-http://localhost}
+      MINIAPP_AUTH_SECRET: ${MINIAPP_AUTH_SECRET:-change_me_miniapp_auth_secret}
       BOTS_REFRESH_SEC: ${BOTS_REFRESH_SEC:-15}
       NOTIFY_POLL_SEC: ${NOTIFY_POLL_SEC:-4}
     depends_on:

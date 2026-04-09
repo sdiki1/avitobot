@@ -1,13 +1,42 @@
 from datetime import datetime, timedelta, timezone
+import hashlib
+import hmac
 
 from sqlalchemy import Select, and_, select
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.models import Monitoring, TariffPlan, TelegramBot, User, UserSubscription
 
 
 def now_utc() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def build_miniapp_auth_token(telegram_id: int) -> str:
+    telegram_raw = str(telegram_id)
+    signature = hmac.new(
+        settings.miniapp_auth_secret.encode("utf-8"),
+        telegram_raw.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()[:24]
+    return f"{telegram_raw}.{signature}"
+
+
+def parse_miniapp_auth_token(token: str) -> int | None:
+    if not token or "." not in token:
+        return None
+    telegram_raw, signature = token.split(".", 1)
+    if not telegram_raw.isdigit() or not signature:
+        return None
+    expected = hmac.new(
+        settings.miniapp_auth_secret.encode("utf-8"),
+        telegram_raw.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()[:24]
+    if not hmac.compare_digest(signature, expected):
+        return None
+    return int(telegram_raw)
 
 
 def generate_referral_code(telegram_id: int) -> str:

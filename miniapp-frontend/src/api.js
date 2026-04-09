@@ -12,6 +12,11 @@ export async function authTelegramUser(payload) {
   return data
 }
 
+export async function resolveAuthToken(authToken) {
+  const { data } = await client.get('/auth/resolve', { params: { auth: authToken } })
+  return data
+}
+
 export async function getPlans() {
   const { data } = await client.get('/plans')
   return data

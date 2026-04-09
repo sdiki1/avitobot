@@ -15,6 +15,7 @@ from app.schemas import (
     PurchaseSubscriptionResponse,
     TariffPlanResponse,
     TelegramAuthRequest,
+    TelegramAuthResolveResponse,
     UserResponse,
 )
 from app.services.helpers import (
@@ -23,6 +24,7 @@ from app.services.helpers import (
     get_active_subscription_query,
     get_available_bot_for_user,
     get_or_create_user,
+    parse_miniapp_auth_token,
 )
 
 router = APIRouter(prefix="/public", tags=["public"])
@@ -99,6 +101,19 @@ def telegram_auth(payload: TelegramAuthRequest, db: Session = Depends(get_db)) -
     )
     user = ensure_user_referral_code(db, user)
     return user
+
+
+@router.get("/auth/resolve", response_model=TelegramAuthResolveResponse)
+def resolve_auth(auth: str = Query(...), db: Session = Depends(get_db)) -> TelegramAuthResolveResponse:
+    telegram_id = parse_miniapp_auth_token(auth)
+    if telegram_id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid auth token")
+    user = get_or_create_user(db, telegram_id=telegram_id, username=None, full_name=None)
+    user = ensure_user_referral_code(db, user)
+    return TelegramAuthResolveResponse(
+        telegram_id=telegram_id,
+        user=UserResponse.model_validate(user),
+    )
 
 
 @router.get("/plans", response_model=list[TariffPlanResponse])
