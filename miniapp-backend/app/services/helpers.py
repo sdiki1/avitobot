@@ -306,7 +306,7 @@ def send_subscription_assigned_bot_message(db: Session, user: User) -> bool:
                 TelegramBot.is_active.is_(True),
             )
         )
-        .order_by(Monitoring.id.asc())
+        .order_by(Monitoring.id.desc())
     )
     if not assigned_bot:
         return False
