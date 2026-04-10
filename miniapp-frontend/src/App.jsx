@@ -356,6 +356,8 @@ export default function App() {
       setSubscriptionView(selectedMonitoringId ? SUBSCRIPTION_VIEW.detail : SUBSCRIPTION_VIEW.home)
       return
     }
+
+    window.Telegram?.WebApp?.close?.()
   }, [selectedMonitoringId, subscriptionView, tab])
 
   const onPurchase = async () => {
@@ -404,6 +406,7 @@ export default function App() {
     backButton.onClick(handleBackNavigation)
     return () => {
       backButton.offClick(handleBackNavigation)
+      backButton.hide()
     }
   }, [handleBackNavigation, subscriptionView, tab])
 
@@ -548,13 +551,6 @@ export default function App() {
                       </button>
                     ))}
                   </div>
-
-                  <p className="hint-text">
-                    Параметры - какая информация будет отправляться дополнительно.{' '}
-                    <a href={miniappContent?.faq_url || '#'} target="_blank" rel="noreferrer">
-                      Узнать больше
-                    </a>
-                  </p>
 
                   <p className="hint-text">
                     Перед первым запуском не забудь{' '}
