@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   authTelegramUser,
   getMiniappContent,
@@ -110,32 +110,6 @@ function CopyIcon() {
   )
 }
 
-function IconClose() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
-    </svg>
-  )
-}
-
-function IconBack() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M15 5l-7 7 7 7" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  )
-}
-
-function IconDots() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <circle cx="5" cy="12" r="1.8" fill="currentColor" />
-      <circle cx="12" cy="12" r="1.8" fill="currentColor" />
-      <circle cx="19" cy="12" r="1.8" fill="currentColor" />
-    </svg>
-  )
-}
-
 function IconHome() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -148,7 +122,7 @@ function IconTicket() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="M4 7a3 3 0 1 0 0 6v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4a3 3 0 1 0 0-6V7a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v0z" fill="currentColor" />
-      <path d="M12 8v8" stroke="#061326" strokeWidth="2" strokeLinecap="round" />
+      <path d="M12 8v8" stroke="#150f24" strokeWidth="2" strokeLinecap="round" />
     </svg>
   )
 }
@@ -366,7 +340,7 @@ export default function App() {
     setSubscriptionView(SUBSCRIPTION_VIEW.buy)
   }
 
-  const onTopLeftClick = () => {
+  const handleBackNavigation = useCallback(() => {
     if (tab !== TABS.subscriptions) {
       setTab(TABS.subscriptions)
       setSubscriptionView(SUBSCRIPTION_VIEW.home)
@@ -379,12 +353,10 @@ export default function App() {
     }
 
     if (subscriptionView === SUBSCRIPTION_VIEW.buy) {
-      setSubscriptionView(selectedMonitoring ? SUBSCRIPTION_VIEW.detail : SUBSCRIPTION_VIEW.home)
+      setSubscriptionView(selectedMonitoringId ? SUBSCRIPTION_VIEW.detail : SUBSCRIPTION_VIEW.home)
       return
     }
-
-    window.Telegram?.WebApp?.close?.()
-  }
+  }, [selectedMonitoringId, subscriptionView, tab])
 
   const onPurchase = async () => {
     if (!telegramId || !selectedPlan || purchaseBusy) return
@@ -421,8 +393,19 @@ export default function App() {
     }))
   }
 
-  const topLeftIcon =
-    tab === TABS.subscriptions && subscriptionView === SUBSCRIPTION_VIEW.home ? <IconClose /> : <IconBack />
+  useEffect(() => {
+    const backButton = window.Telegram?.WebApp?.BackButton
+    if (!backButton) return
+
+    const canGoBack = tab !== TABS.subscriptions || subscriptionView !== SUBSCRIPTION_VIEW.home
+    if (canGoBack) backButton.show()
+    else backButton.hide()
+
+    backButton.onClick(handleBackNavigation)
+    return () => {
+      backButton.offClick(handleBackNavigation)
+    }
+  }, [handleBackNavigation, subscriptionView, tab])
 
   const activeInfoLinks = miniappContent?.info_links?.length
     ? miniappContent.info_links
@@ -444,17 +427,6 @@ export default function App() {
   return (
     <div className="app-root">
       <div className="mobile-shell">
-        <header className="topbar">
-          <button type="button" className="top-btn" onClick={onTopLeftClick} aria-label="Назад">
-            {topLeftIcon}
-          </button>
-          <div className="topbar-spacer" aria-hidden="true" />
-
-          <button type="button" className="top-btn" onClick={() => setStatusMessage('Меню скоро будет доступно')} aria-label="Меню">
-            <IconDots />
-          </button>
-        </header>
-
         <main className="main-content">
           {statusMessage && <div className="status-banner">{statusMessage}</div>}
 

@@ -2,16 +2,16 @@
 
 :root {
   --bg: #000000;
-  --panel: #10141b;
-  --panel-strong: #070b12;
-  --card: #02060d;
+  --panel: #160f1f;
+  --panel-strong: #0b0714;
+  --card: #06030d;
   --line: rgba(255, 255, 255, 0.08);
-  --line-strong: rgba(49, 124, 243, 0.8);
+  --line-strong: rgba(128, 89, 235, 0.85);
   --text: #f5f7fa;
   --muted: #8c9199;
-  --accent: #2f7cf5;
-  --accent-hover: #3b88ff;
-  --nav-bg: #070b12;
+  --accent: #6d48d7;
+  --accent-hover: #7d57ea;
+  --nav-bg: #0a0612;
 }
 
 * {
@@ -44,7 +44,7 @@ a {
   min-height: 100vh;
   display: flex;
   justify-content: center;
-  background: radial-gradient(circle at 50% -20%, rgba(47, 124, 245, 0.12), transparent 50%), var(--bg);
+  background: radial-gradient(circle at 50% -20%, rgba(125, 87, 234, 0.18), transparent 52%), var(--bg);
 }
 
 .mobile-shell {
@@ -54,55 +54,13 @@ a {
   background: var(--bg);
 }
 
-.topbar {
-  position: sticky;
-  top: 0;
-  z-index: 40;
-  margin: 12px 12px 0;
-  border-radius: 24px 24px 0 0;
-  border: 1px solid var(--line);
-  border-bottom: 0;
-  background: var(--panel);
-  display: grid;
-  grid-template-columns: 46px minmax(0, 1fr) 46px;
-  gap: 10px;
-  align-items: center;
-  padding: 14px 12px;
-}
-
-.top-btn {
-  border: 0;
-  background: transparent;
-  color: #ffffff;
-  width: 46px;
-  height: 46px;
-  border-radius: 12px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-}
-
-.top-btn svg {
-  width: 28px;
-  height: 28px;
-}
-
-.top-btn:active {
-  transform: translateY(1px);
-}
-
-.topbar-spacer {
-  min-height: 1px;
-}
-
 .main-content {
-  padding: 16px 16px calc(96px + env(safe-area-inset-bottom));
+  padding: max(12px, env(safe-area-inset-top)) 16px calc(96px + env(safe-area-inset-bottom));
 }
 
 .status-banner {
-  border: 1px solid rgba(47, 124, 245, 0.5);
-  background: rgba(13, 30, 58, 0.85);
+  border: 1px solid rgba(128, 89, 235, 0.45);
+  background: rgba(44, 24, 74, 0.75);
   border-radius: 14px;
   padding: 10px 12px;
   margin-bottom: 16px;
@@ -156,8 +114,8 @@ a {
 
 .subscription-card {
   width: 100%;
-  border: 1px solid rgba(34, 45, 66, 0.95);
-  background: #02060d;
+  border: 1px solid rgba(62, 45, 96, 0.85);
+  background: #07040f;
   border-radius: 22px;
   color: var(--text);
   padding: 14px;
@@ -231,7 +189,7 @@ a {
 }
 
 .link-arrow {
-  color: #9dbef9;
+  color: #b59fff;
 }
 
 .primary-btn,
@@ -265,15 +223,15 @@ a {
 
 .secondary-btn {
   border: 1px solid var(--line);
-  background: #0a1018;
+  background: #130f1f;
   color: #f2f6ff;
 }
 
 .dark-input {
   width: 100%;
   border-radius: 16px;
-  border: 1px solid #182435;
-  background: #040912;
+  border: 1px solid #34274f;
+  background: #0a0614;
   color: var(--text);
   padding: 14px 16px;
   font-size: clamp(17px, 3.7vw, 24px);
@@ -286,7 +244,7 @@ a {
 
 .dark-input:focus {
   border-color: var(--line-strong);
-  box-shadow: 0 0 0 2px rgba(47, 124, 245, 0.2);
+  box-shadow: 0 0 0 2px rgba(128, 89, 235, 0.25);
 }
 
 .hint-text {
@@ -319,13 +277,13 @@ a {
   width: 20px;
   height: 20px;
   border-radius: 5px;
-  border: 2px solid #105fc9;
+  border: 2px solid #6e4bd7;
   background: transparent;
   flex-shrink: 0;
 }
 
 .check-box.checked {
-  background: #2f7cf5;
+  background: var(--accent);
 }
 
 .choices-list {
@@ -349,7 +307,7 @@ a {
 .choice-dot {
   width: 22px;
   height: 22px;
-  border: 2px solid #0d61cf;
+  border: 2px solid #6e4bd7;
   border-radius: 50%;
   display: inline-flex;
   align-items: center;
@@ -361,7 +319,7 @@ a {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: #2f7cf5;
+  background: var(--accent);
 }
 
 .choice-main {
@@ -431,7 +389,7 @@ a {
   border-radius: 9px;
   border: 1px solid var(--line);
   background: #0c131f;
-  color: #8eb6fb;
+  color: #b59fff;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -489,27 +447,10 @@ a {
 }
 
 .bottom-nav-item.active {
-  color: #2f7cf5;
+  color: var(--accent);
 }
 
 @media (max-width: 700px) {
-  .topbar {
-    margin: 10px 10px 0;
-    border-radius: 22px 22px 0 0;
-    grid-template-columns: 42px minmax(0, 1fr) 42px;
-    padding: 10px;
-  }
-
-  .top-btn {
-    width: 42px;
-    height: 42px;
-  }
-
-  .top-btn svg {
-    width: 26px;
-    height: 26px;
-  }
-
   .main-content {
     padding: 14px 14px calc(92px + env(safe-area-inset-bottom));
   }
@@ -521,7 +462,7 @@ a {
 
 @media (min-width: 701px) {
   .main-content {
-    padding: 22px 24px calc(114px + env(safe-area-inset-bottom));
+    padding: max(20px, env(safe-area-inset-top)) 24px calc(114px + env(safe-area-inset-bottom));
   }
 
   .bottom-nav {
