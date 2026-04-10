@@ -448,11 +448,7 @@ export default function App() {
           <button type="button" className="top-btn" onClick={onTopLeftClick} aria-label="Назад">
             {topLeftIcon}
           </button>
-
-          <div className="brand-pill">
-            <span className="brand-avatar">🤖</span>
-            <span className="brand-title">SCANURIK 🤖</span>
-          </div>
+          <div className="topbar-spacer" aria-hidden="true" />
 
           <button type="button" className="top-btn" onClick={() => setStatusMessage('Меню скоро будет доступно')} aria-label="Меню">
             <IconDots />
