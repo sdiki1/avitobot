@@ -404,7 +404,8 @@ def activate_subscription(payload: ActivateSubscriptionRequest, db: Session = De
     if not plan:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
     new_sub = activate_user_subscription(db, user.id, plan)
-    slots_created = ensure_subscription_monitoring_slots(db, user.id, plan.links_limit)
+    current_total_slots = db.scalar(select(func.count(Monitoring.id)).where(Monitoring.user_id == user.id)) or 0
+    slots_created = ensure_subscription_monitoring_slots(db, user.id, current_total_slots + 1)
 
     return {
         "ok": True,

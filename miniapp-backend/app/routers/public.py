@@ -185,7 +185,8 @@ def _activate_onboarding_trial(db: Session, user: User) -> UserSubscription | No
         amount_paid_override=0,
         is_trial=True,
     )
-    ensure_subscription_monitoring_slots(db, user.id, plan.links_limit)
+    current_total_slots = db.scalar(select(func.count(Monitoring.id)).where(Monitoring.user_id == user.id)) or 0
+    ensure_subscription_monitoring_slots(db, user.id, current_total_slots + 1)
     send_subscription_assigned_bot_message(db, user)
     return subscription
 
@@ -378,7 +379,7 @@ def purchase_subscription(
     trial_days = get_trial_days(db)
     use_trial = trial_days > 0 and existing_subscriptions == 0
 
-    slots_to_add = max(0, int(plan.links_limit))
+    slots_to_add = 1
     _require_free_bots_for_new_slots(db, user.id, slots_to_add)
 
     current_total_slots = db.scalar(select(func.count(Monitoring.id)).where(Monitoring.user_id == user.id)) or 0
