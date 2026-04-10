@@ -97,6 +97,7 @@ def active_bots(db: Session = Depends(get_db)) -> list[InternalBotConfigResponse
             id=bot.id,
             name=bot.name,
             bot_token=bot.bot_token,
+            is_primary=bot.is_primary,
             telegram_bot_id=bot.telegram_bot_id,
             bot_username=bot.bot_username,
         )

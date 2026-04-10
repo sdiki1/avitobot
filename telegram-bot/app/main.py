@@ -188,6 +188,15 @@ class BackendAPI:
         payload = response.json()
         return payload if isinstance(payload, dict) else {}
 
+    async def onboarding_trial(self, telegram_id: int) -> dict[str, Any]:
+        response = await self.client.post(
+            f"{BACKEND_URL}/api/v1/public/onboarding-trial",
+            json={"telegram_id": telegram_id},
+        )
+        response.raise_for_status()
+        payload = response.json()
+        return payload if isinstance(payload, dict) else {}
+
     async def active_bots(self) -> list[dict[str, Any]]:
         response = await self.client.get(
             f"{BACKEND_URL}/api/v1/internal/bots/active",
@@ -262,8 +271,46 @@ class BackendAPI:
         response.raise_for_status()
 
 
-def build_router(bot_id: int, backend: BackendAPI) -> Router:
+def build_router(bot_id: int, backend: BackendAPI, *, is_primary: bool = False) -> Router:
     router = Router()
+
+    if is_primary:
+        @router.message(CommandStart())
+        async def cmd_start_primary(message: Message) -> None:
+            tg_user = message.from_user
+            await backend.auth_user(
+                telegram_id=tg_user.id,
+                username=tg_user.username,
+                full_name=tg_user.full_name,
+            )
+            trial_prefix = ""
+            try:
+                trial_payload = await backend.onboarding_trial(tg_user.id)
+                if trial_payload.get("granted") is True:
+                    trial_prefix = "Вам начислено тестовый период мониторинга: 2 дня\n\n"
+            except Exception as exc:
+                logger.warning(f"Failed to grant onboarding trial for user {tg_user.id}: {exc}")
+
+            text = (
+                f"{trial_prefix}"
+                "Этот бот мониторит новые объявления на Avito.\n"
+                "Откройте MiniApp, чтобы управлять подпиской и назначенными ботами."
+            )
+            await message.answer(text, reply_markup=miniapp_keyboard(tg_user.id))
+
+        @router.message(Command("miniapp"))
+        async def cmd_miniapp_primary(message: Message) -> None:
+            await message.answer("Откройте miniapp", reply_markup=miniapp_keyboard(message.from_user.id))
+
+        @router.message()
+        async def any_message_primary(message: Message) -> None:
+            await message.answer(
+                "Этот бот предназначен для старта работы.\n"
+                "Нажмите кнопку ниже, чтобы открыть MiniApp.",
+                reply_markup=miniapp_keyboard(message.from_user.id),
+            )
+
+        return router
 
     async def _show_status(message: Message) -> None:
         status_code, payload = await backend.current_monitoring(bot_id=bot_id, telegram_id=message.from_user.id)
@@ -499,6 +546,7 @@ def build_router(bot_id: int, backend: BackendAPI) -> Router:
 class BotRuntime:
     bot_id: int
     token: str
+    is_primary: bool
     bot: Bot
     dispatcher: Dispatcher
     task: asyncio.Task[None]
@@ -512,6 +560,7 @@ class MultiBotManager:
     async def start_bot(self, config: dict[str, Any]) -> None:
         bot_id = int(config["id"])
         token = str(config.get("bot_token", "")).strip()
+        is_primary = bool(config.get("is_primary", False))
         if not has_valid_bot_token(token):
             logger.error(f"Bot #{bot_id} has invalid token, skipping")
             return
@@ -520,26 +569,34 @@ class MultiBotManager:
         try:
             me = await bot.get_me()
             await self.backend.sync_bot_metadata(bot_id=bot_id, telegram_bot_id=me.id, bot_username=me.username)
-            await bot.set_my_commands(
-                [
-                    BotCommand(command="start_monitoring", description="Запустить мониторинг"),
-                    BotCommand(command="stop_monitoring", description="Остановить мониторинг"),
-                    BotCommand(command="change_link", description="Поменять ссылку"),
-                    BotCommand(command="status", description="Статус мониторинга"),
-                    BotCommand(command="miniapp", description="Открыть miniapp"),
-                ]
-            )
+            if is_primary:
+                await bot.set_my_commands(
+                    [
+                        BotCommand(command="miniapp", description="Открыть miniapp"),
+                    ]
+                )
+            else:
+                await bot.set_my_commands(
+                    [
+                        BotCommand(command="start_monitoring", description="Запустить мониторинг"),
+                        BotCommand(command="stop_monitoring", description="Остановить мониторинг"),
+                        BotCommand(command="change_link", description="Поменять ссылку"),
+                        BotCommand(command="status", description="Статус мониторинга"),
+                        BotCommand(command="miniapp", description="Открыть miniapp"),
+                    ]
+                )
         except Exception as exc:
             logger.error(f"Failed to initialize bot #{bot_id}: {exc}")
             await bot.session.close()
             return
 
         dispatcher = Dispatcher()
-        dispatcher.include_router(build_router(bot_id=bot_id, backend=self.backend))
+        dispatcher.include_router(build_router(bot_id=bot_id, backend=self.backend, is_primary=is_primary))
         task = asyncio.create_task(dispatcher.start_polling(bot))
         self.runtimes[bot_id] = BotRuntime(
             bot_id=bot_id,
             token=token,
+            is_primary=is_primary,
             bot=bot,
             dispatcher=dispatcher,
             task=task,
@@ -581,7 +638,8 @@ class MultiBotManager:
                 continue
 
             new_token = str(incoming[bot_id].get("bot_token", "")).strip()
-            if runtime.task.done() or runtime.token != new_token:
+            new_is_primary = bool(incoming[bot_id].get("is_primary", False))
+            if runtime.task.done() or runtime.token != new_token or runtime.is_primary != new_is_primary:
                 await self.stop_bot(bot_id)
 
         for bot_id, cfg in incoming.items():

@@ -201,6 +201,16 @@ class PurchaseSubscriptionResponse(BaseModel):
     is_trial: bool = False
 
 
+class OnboardingTrialRequest(BaseModel):
+    telegram_id: int
+
+
+class OnboardingTrialResponse(BaseModel):
+    granted: bool
+    days: int
+    ends_at: datetime | None = None
+
+
 class TrialSettingsResponse(BaseModel):
     trial_days: int = Field(ge=0)
 
@@ -282,6 +292,7 @@ class InternalBotConfigResponse(BaseModel):
     id: int
     name: str
     bot_token: str
+    is_primary: bool = False
     telegram_bot_id: int | None = None
     bot_username: str | None = None
 

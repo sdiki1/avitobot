@@ -12,6 +12,8 @@ from app.schemas import (
     MonitoringPurchaseRequest,
     MonitoringResponse,
     NotificationResponse,
+    OnboardingTrialRequest,
+    OnboardingTrialResponse,
     PurchaseSubscriptionRequest,
     PurchaseSubscriptionResponse,
     TariffPlanResponse,
@@ -33,6 +35,7 @@ from app.services.helpers import (
 )
 
 router = APIRouter(prefix="/public", tags=["public"])
+ONBOARDING_TRIAL_DAYS = 2
 
 
 def _build_bot_link(username: str | None) -> str | None:
@@ -121,6 +124,41 @@ def _require_slot_available(db: Session, user_id: int, links_limit: int) -> int:
     return total_links
 
 
+def _activate_onboarding_trial(db: Session, user: User) -> UserSubscription | None:
+    existing_subscriptions = db.scalar(select(func.count(UserSubscription.id)).where(UserSubscription.user_id == user.id)) or 0
+    if existing_subscriptions > 0:
+        return None
+
+    plan = db.scalar(
+        select(TariffPlan)
+        .where(and_(TariffPlan.is_active.is_(True), TariffPlan.links_limit > 0))
+        .order_by(TariffPlan.links_limit.asc(), TariffPlan.price_rub.asc(), TariffPlan.id.asc())
+    )
+    if not plan:
+        return None
+
+    db.add(
+        Payment(
+            user_id=user.id,
+            plan_id=plan.id,
+            amount_rub=0,
+            status="completed",
+            provider="onboarding_trial",
+        )
+    )
+    subscription = activate_user_subscription(
+        db,
+        user.id,
+        plan,
+        duration_days_override=ONBOARDING_TRIAL_DAYS,
+        amount_paid_override=0,
+        is_trial=True,
+    )
+    ensure_subscription_monitoring_slots(db, user.id, plan.links_limit)
+    send_subscription_assigned_bot_message(db, user)
+    return subscription
+
+
 @router.post("/auth/telegram", response_model=UserResponse)
 def telegram_auth(payload: TelegramAuthRequest, db: Session = Depends(get_db)) -> User:
     user = get_or_create_user(
@@ -144,6 +182,16 @@ def resolve_auth(auth: str = Query(...), db: Session = Depends(get_db)) -> Teleg
         telegram_id=telegram_id,
         user=UserResponse.model_validate(user),
     )
+
+
+@router.post("/onboarding-trial", response_model=OnboardingTrialResponse)
+def onboarding_trial(payload: OnboardingTrialRequest, db: Session = Depends(get_db)) -> OnboardingTrialResponse:
+    user = get_or_create_user(db, payload.telegram_id, username=None, full_name=None)
+    user = ensure_user_referral_code(db, user)
+    subscription = _activate_onboarding_trial(db, user)
+    if not subscription:
+        return OnboardingTrialResponse(granted=False, days=ONBOARDING_TRIAL_DAYS, ends_at=None)
+    return OnboardingTrialResponse(granted=True, days=ONBOARDING_TRIAL_DAYS, ends_at=subscription.ends_at)
 
 
 @router.get("/plans", response_model=list[TariffPlanResponse])
