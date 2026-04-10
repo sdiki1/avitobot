@@ -5,7 +5,7 @@ import json
 import logging
 from urllib import request as urllib_request
 
-from sqlalchemy import Select, and_, select
+from sqlalchemy import Select, and_, func, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -152,6 +152,43 @@ def get_available_bot_for_user(db: Session, user_id: int) -> TelegramBot | None:
     return None
 
 
+def ensure_subscription_monitoring_slots(db: Session, user_id: int, links_limit: int) -> int:
+    target_slots = max(0, int(links_limit))
+    if target_slots == 0:
+        return 0
+
+    existing_total = db.scalar(select(func.count(Monitoring.id)).where(Monitoring.user_id == user_id)) or 0
+    if existing_total >= target_slots:
+        return 0
+
+    created = 0
+    for slot_index in range(existing_total, target_slots):
+        bot = get_available_bot_for_user(db, user_id)
+        if not bot:
+            break
+        db.add(
+            Monitoring(
+                user_id=user_id,
+                bot_id=bot.id,
+                url="https://www.avito.ru/",
+                title=f"Мониторинг #{slot_index + 1}",
+                keywords_white="",
+                keywords_black="",
+                min_price=None,
+                max_price=None,
+                geo=None,
+                is_active=False,
+                link_configured=False,
+            )
+        )
+        db.flush()
+        created += 1
+
+    if created:
+        db.commit()
+    return created
+
+
 def get_trial_days(db: Session) -> int:
     setting = db.scalar(select(AppSetting).where(AppSetting.key == TRIAL_DAYS_SETTING_KEY))
     if not setting:
@@ -220,8 +257,6 @@ def send_subscription_assigned_bot_message(db: Session, user: User) -> bool:
         )
         .order_by(Monitoring.id.asc())
     )
-    if not assigned_bot:
-        assigned_bot = get_available_bot_for_user(db, user.id)
     if not assigned_bot:
         return False
 

@@ -23,6 +23,7 @@ from app.schemas import (
 from app.services.auth import require_admin_token
 from app.services.helpers import (
     activate_user_subscription,
+    ensure_subscription_monitoring_slots,
     get_or_create_user,
     get_trial_days,
     now_utc,
@@ -345,6 +346,7 @@ def activate_subscription(payload: ActivateSubscriptionRequest, db: Session = De
     if not plan:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
     new_sub = activate_user_subscription(db, user.id, plan)
+    slots_created = ensure_subscription_monitoring_slots(db, user.id, plan.links_limit)
 
     return {
         "ok": True,
@@ -352,4 +354,5 @@ def activate_subscription(payload: ActivateSubscriptionRequest, db: Session = De
         "user_id": user.id,
         "plan_id": plan.id,
         "ends_at": new_sub.ends_at,
+        "slots_created": slots_created,
     }

@@ -20,6 +20,7 @@ from app.schemas import (
 )
 from app.services.helpers import (
     activate_user_subscription,
+    ensure_subscription_monitoring_slots,
     ensure_user_referral_code,
     get_active_subscription_query,
     get_available_bot_for_user,
@@ -281,6 +282,7 @@ def purchase_subscription(
         amount_paid_override=0 if use_trial else plan.price_rub,
         is_trial=use_trial,
     )
+    ensure_subscription_monitoring_slots(db, user.id, plan.links_limit)
     send_subscription_assigned_bot_message(db, user)
     return PurchaseSubscriptionResponse(
         ok=True,

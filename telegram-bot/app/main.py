@@ -233,16 +233,6 @@ def build_router(bot_id: int, backend: BackendAPI) -> Router:
         status_code, payload = await backend.current_monitoring(bot_id=bot_id, telegram_id=tg_user.id)
 
         if start_arg == "subscription":
-            if status_code != 200:
-                if status_code == 404:
-                    await message.answer(
-                        "Подписка для этого бота пока не назначена.\n"
-                        "Купите мониторинг в miniapp, чтобы активировать этот бот."
-                    )
-                    return
-                await message.answer(f"Не удалось получить данные подписки: {_extract_error(payload)}")
-                return
-
             try:
                 profile = await backend.get_profile(tg_user.id)
             except Exception as exc:
@@ -260,6 +250,22 @@ def build_router(bot_id: int, backend: BackendAPI) -> Router:
                 )
             else:
                 subscription_line = "Подписка: неактивна"
+
+            if status_code != 200:
+                if status_code == 404:
+                    if subscription:
+                        await message.answer(
+                            "Подписка активна, но этот бот не привязан к вашему мониторингу.\n"
+                            "Откройте назначенного бота из раздела Подписки в miniapp."
+                        )
+                        return
+                    await message.answer(
+                        "Активной подписки пока нет.\n"
+                        "Выберите тариф в miniapp, чтобы получить назначенного бота."
+                    )
+                    return
+                await message.answer(f"Не удалось получить данные подписки: {_extract_error(payload)}")
+                return
 
             text = (
                 "Данные подписки для этого бота:\n\n"

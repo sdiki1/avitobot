@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import and_, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -39,10 +39,46 @@ def _resolve_user_monitoring(db: Session, telegram_id: int, bot_id: int) -> Moni
         .order_by(Monitoring.id.desc())
     )
     if not monitoring:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Для этого бота у пользователя нет купленного мониторинга",
+        bot = db.get(TelegramBot, bot_id)
+        if not bot or not bot.is_active:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bot not found")
+        if bot.is_primary:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Этот бот не используется для мониторинга",
+            )
+
+        active_sub = _require_active_subscription(db, user.id)
+        links_limit = active_sub.plan.links_limit if active_sub.plan else 0
+        if links_limit <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Для активной подписки не выделены слоты мониторинга",
+            )
+
+        total_links = db.scalar(select(func.count(Monitoring.id)).where(Monitoring.user_id == user.id)) or 0
+        if total_links >= links_limit:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Лимит мониторингов по подписке исчерпан для этого пользователя",
+            )
+
+        monitoring = Monitoring(
+            user_id=user.id,
+            bot_id=bot_id,
+            url="https://www.avito.ru/",
+            title=f"Мониторинг #{total_links + 1}",
+            keywords_white="",
+            keywords_black="",
+            min_price=None,
+            max_price=None,
+            geo=None,
+            is_active=False,
+            link_configured=False,
         )
+        db.add(monitoring)
+        db.commit()
+        db.refresh(monitoring)
     return monitoring
 
 
