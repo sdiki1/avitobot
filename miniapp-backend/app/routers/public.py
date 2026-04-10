@@ -124,6 +124,37 @@ def _require_slot_available(db: Session, user_id: int, links_limit: int) -> int:
     return total_links
 
 
+def _require_free_bots_for_new_slots(db: Session, user_id: int, slots_to_add: int) -> None:
+    if slots_to_add <= 0:
+        return
+
+    total_active_monitoring_bots = db.scalar(
+        select(func.count(TelegramBot.id)).where(
+            and_(
+                TelegramBot.is_active.is_(True),
+                TelegramBot.is_primary.is_(False),
+            )
+        )
+    ) or 0
+    used_by_user = db.scalar(
+        select(func.count(func.distinct(Monitoring.bot_id))).where(
+            and_(
+                Monitoring.user_id == user_id,
+                Monitoring.bot_id.is_not(None),
+            )
+        )
+    ) or 0
+    free_bots = max(0, int(total_active_monitoring_bots) - int(used_by_user))
+    if free_bots < slots_to_add:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Недостаточно свободных ботов для новой подписки. "
+                f"Нужно: {slots_to_add}, доступно: {free_bots}. Добавьте ботов в админке."
+            ),
+        )
+
+
 def _activate_onboarding_trial(db: Session, user: User) -> UserSubscription | None:
     existing_subscriptions = db.scalar(select(func.count(UserSubscription.id)).where(UserSubscription.user_id == user.id)) or 0
     if existing_subscriptions > 0:
@@ -347,6 +378,12 @@ def purchase_subscription(
     trial_days = get_trial_days(db)
     use_trial = trial_days > 0 and existing_subscriptions == 0
 
+    slots_to_add = max(0, int(plan.links_limit))
+    _require_free_bots_for_new_slots(db, user.id, slots_to_add)
+
+    current_total_slots = db.scalar(select(func.count(Monitoring.id)).where(Monitoring.user_id == user.id)) or 0
+    target_total_slots = current_total_slots + slots_to_add
+
     payment = Payment(
         user_id=user.id,
         plan_id=plan.id,
@@ -363,7 +400,7 @@ def purchase_subscription(
         amount_paid_override=0 if use_trial else plan.price_rub,
         is_trial=use_trial,
     )
-    ensure_subscription_monitoring_slots(db, user.id, plan.links_limit)
+    ensure_subscription_monitoring_slots(db, user.id, target_total_slots)
     send_subscription_assigned_bot_message(db, user)
     return PurchaseSubscriptionResponse(
         ok=True,

@@ -518,12 +518,7 @@ export default function App() {
                     onChange={(event) => updateSelectedDraft({ url: event.target.value })}
                   />
 
-                  <p className="hint-text">
-                    Ссылка на объявления — это поисковая ссылка, которая выводит все объявления при поиске.{' '}
-                    <a href={miniappContent?.faq_url || '#'} target="_blank" rel="noreferrer">
-                      Узнать больше
-                    </a>
-                  </p>
+                  <p className="hint-text">Ссылка на объявления — это поисковая ссылка, которая выводит все объявления при поиске.</p>
 
                   <button type="button" className="primary-btn" onClick={openBuyScreen}>
                     Продлить подписку →
