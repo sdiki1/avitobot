@@ -3,7 +3,8 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import Base, engine
-from app.models import TariffPlan, TelegramBot
+from app.models import AppSetting, TariffPlan, TelegramBot
+from app.services.helpers import DEFAULT_TRIAL_DAYS, TRIAL_DAYS_SETTING_KEY
 
 
 DEFAULT_PLANS = [
@@ -62,6 +63,9 @@ def init_db() -> None:
             "AND NOT EXISTS (SELECT 1 FROM telegram_bots WHERE is_primary IS TRUE)"
         )
 
+        conn.exec_driver_sql("ALTER TABLE user_subscriptions ADD COLUMN IF NOT EXISTS is_trial BOOLEAN DEFAULT FALSE")
+        conn.exec_driver_sql("UPDATE user_subscriptions SET is_trial = FALSE WHERE is_trial IS NULL")
+
 
 def seed_default_plans(db: Session) -> None:
     for plan in DEFAULT_PLANS:
@@ -82,4 +86,8 @@ def seed_default_plans(db: Session) -> None:
                     is_primary=True,
                 )
             )
+
+    trial_setting = db.scalar(select(AppSetting).where(AppSetting.key == TRIAL_DAYS_SETTING_KEY))
+    if not trial_setting:
+        db.add(AppSetting(key=TRIAL_DAYS_SETTING_KEY, value=str(DEFAULT_TRIAL_DAYS)))
     db.commit()

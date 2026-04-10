@@ -45,6 +45,13 @@ function formatBotLabel(bot) {
   return `${bot.name} (${username})`
 }
 
+function buildSubscriptionBotLink(bot) {
+  const base = bot?.bot_link
+  if (!base) return null
+  const joiner = base.includes('?') ? '&' : '?'
+  return `${base}${joiner}start=subscription`
+}
+
 function CopyIcon() {
   return (
     <svg className="copy-icon" viewBox="0 0 24 24" aria-hidden="true">
@@ -137,12 +144,16 @@ export default function App() {
     if (!telegramId || !selectedPlanId || purchaseBusy) return
     try {
       setPurchaseBusy(true)
-      await purchaseSubscription({
+      const purchaseResult = await purchaseSubscription({
         telegram_id: telegramId,
         plan_id: Number(selectedPlanId),
       })
       await loadData(telegramId)
-      setStatusMessage(`Подписка активирована: ${activePlan?.name || 'тариф'}`)
+      if (purchaseResult?.is_trial) {
+        setStatusMessage(`Активирован пробный период: ${activePlan?.name || 'тариф'}`)
+      } else {
+        setStatusMessage(`Подписка активирована: ${activePlan?.name || 'тариф'}`)
+      }
     } catch (error) {
       const detail = error?.response?.data?.detail || error?.message || 'Ошибка покупки подписки'
       setStatusMessage(`Ошибка: ${detail}`)
@@ -197,27 +208,46 @@ export default function App() {
                 <p className="muted">
                   Текущая подписка:{' '}
                   {profile?.subscription
-                    ? `${profile.subscription.plan_name} до ${formatDate(profile.subscription.ends_at)}`
+                    ? `${profile.subscription.plan_name}${profile.subscription.is_trial ? ' (пробный период)' : ''} до ${formatDate(profile.subscription.ends_at)}`
                     : 'нет'}
                 </p>
                 <div className="monitorings">
                   {monitorings.length === 0 && (
                     <div className="empty">У вас пока нет активных подписок на мониторинг.</div>
                   )}
-                  {monitorings.map((monitoring) => (
-                    <div className="monitoring-item" key={monitoring.id}>
-                      <div>
-                        <strong>{monitoring.title || `Мониторинг #${monitoring.id}`}</strong>
-                        <p>{monitoring.url}</p>
-                        <p>{formatBotLabel(monitoring.bot)}</p>
+                  {monitorings.map((monitoring) => {
+                    const subscriptionLink = buildSubscriptionBotLink(monitoring.bot)
+                    return (
+                      <div className="monitoring-item" key={monitoring.id}>
+                        <div>
+                          <strong>{monitoring.title || `Мониторинг #${monitoring.id}`}</strong>
+                          <p>{monitoring.url}</p>
+                          {subscriptionLink ? (
+                            <a
+                              href={subscriptionLink}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="bot-link"
+                            >
+                              {formatBotLabel(monitoring.bot)}
+                            </a>
+                          ) : (
+                            <p>{formatBotLabel(monitoring.bot)}</p>
+                          )}
+                        </div>
+                        {subscriptionLink && (
+                          <a
+                            href={subscriptionLink}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="mini-link"
+                          >
+                            Открыть подписку
+                          </a>
+                        )}
                       </div>
-                      {monitoring.bot?.bot_link && (
-                        <a href={monitoring.bot.bot_link} target="_blank" rel="noreferrer" className="mini-link">
-                          Открыть бота
-                        </a>
-                      )}
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
                 <button
                   type="button"
@@ -245,7 +275,7 @@ export default function App() {
                   <p className="muted">
                     Активная подписка:{' '}
                     {profile?.subscription
-                      ? `${profile.subscription.plan_name} до ${formatDate(profile.subscription.ends_at)}`
+                      ? `${profile.subscription.plan_name}${profile.subscription.is_trial ? ' (пробный период)' : ''} до ${formatDate(profile.subscription.ends_at)}`
                       : 'нет'}
                   </p>
                   <div className="buy-row">

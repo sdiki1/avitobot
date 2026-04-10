@@ -189,6 +189,21 @@ h2 {
   word-break: break-word;
 }
 
+.monitoring-item .bot-link {
+  margin: 3px 0;
+  display: inline-block;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.4;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  word-break: break-word;
+}
+
+.monitoring-item .bot-link:hover {
+  color: #ffffff;
+}
+
 .monitoring-side {
   display: flex;
   flex-direction: column;

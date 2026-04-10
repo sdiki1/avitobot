@@ -16,14 +16,21 @@ function withAdminBase(path) {
 
 router.get('/', async (req, res) => {
   try {
-    const [stats, plans, proxies, bots] = await Promise.all([api.getStats(), api.getPlans(), api.getProxies(), api.getBots()]);
-    res.render('dashboard', { stats, plans, proxies, bots, error: null, success: req.query.success || null });
+    const [stats, plans, proxies, bots, trialSettings] = await Promise.all([
+      api.getStats(),
+      api.getPlans(),
+      api.getProxies(),
+      api.getBots(),
+      api.getTrialSettings(),
+    ]);
+    res.render('dashboard', { stats, plans, proxies, bots, trialSettings, error: null, success: req.query.success || null });
   } catch (error) {
     res.render('dashboard', {
       stats: { users_count: 0, active_monitorings: 0, active_subscriptions: 0, payments_total_rub: 0, active_bots: 0 },
       plans: [],
       proxies: [],
       bots: [],
+      trialSettings: { trial_days: 0 },
       error: error.message,
       success: null,
     });
@@ -224,6 +231,17 @@ router.post('/subscriptions/activate', async (req, res) => {
       plan_id: toInt(req.body.plan_id),
     });
     res.redirect(withAdminBase('/?success=Подписка+активирована'));
+  } catch (error) {
+    res.redirect(withAdminBase(`/?success=${encodeURIComponent(`Ошибка: ${error.message}`)}`));
+  }
+});
+
+router.post('/trial-settings/update', async (req, res) => {
+  try {
+    await api.updateTrialSettings({
+      trial_days: toInt(req.body.trial_days) || 0,
+    });
+    res.redirect(withAdminBase('/?success=Пробный+период+обновлен'));
   } catch (error) {
     res.redirect(withAdminBase(`/?success=${encodeURIComponent(`Ошибка: ${error.message}`)}`));
   }

@@ -30,6 +30,19 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class AppSetting(Base):
+    __tablename__ = "app_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    key: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    value: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
 class TelegramBot(Base):
     __tablename__ = "telegram_bots"
 
@@ -73,6 +86,7 @@ class UserSubscription(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     plan_id: Mapped[int] = mapped_column(ForeignKey("tariff_plans.id", ondelete="SET NULL"), nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="active")
+    is_trial: Mapped[bool] = mapped_column(Boolean, default=False)
     amount_paid: Mapped[int] = mapped_column(Integer, default=0)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)

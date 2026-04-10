@@ -50,6 +50,22 @@
 </section>
 
 <section class="card">
+  <h2>Пробный период</h2>
+  <form class="form-grid two" action="<%= adminBase %>/trial-settings/update" method="post">
+    <input
+      name="trial_days"
+      type="number"
+      min="0"
+      value="<%= trialSettings?.trial_days ?? 0 %>"
+      placeholder="Дней пробного периода"
+      required
+    />
+    <button type="submit">Сохранить</button>
+  </form>
+  <p class="muted">0 дней = пробный период выключен. Пробный период выдается только при первой покупке.</p>
+</section>
+
+<section class="card">
   <h2>Подключенные боты</h2>
   <div class="table-wrap">
     <table class="table">

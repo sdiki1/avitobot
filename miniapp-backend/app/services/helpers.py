@@ -9,9 +9,11 @@ from sqlalchemy import Select, and_, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.models import Monitoring, TariffPlan, TelegramBot, User, UserSubscription
+from app.models import AppSetting, Monitoring, TariffPlan, TelegramBot, User, UserSubscription
 
 logger = logging.getLogger(__name__)
+TRIAL_DAYS_SETTING_KEY = "trial_days"
+DEFAULT_TRIAL_DAYS = 3
 
 
 def now_utc() -> datetime:
@@ -92,19 +94,30 @@ def get_active_subscription_query(user_id: int) -> Select[tuple[UserSubscription
     ).order_by(UserSubscription.ends_at.desc())
 
 
-def activate_user_subscription(db: Session, user_id: int, plan: TariffPlan) -> UserSubscription:
+def activate_user_subscription(
+    db: Session,
+    user_id: int,
+    plan: TariffPlan,
+    *,
+    duration_days_override: int | None = None,
+    amount_paid_override: int | None = None,
+    is_trial: bool = False,
+) -> UserSubscription:
     active_sub = db.scalar(get_active_subscription_query(user_id))
     if active_sub:
         active_sub.status = "expired"
 
     started = now_utc()
+    duration_days = duration_days_override if duration_days_override is not None else plan.duration_days
+    amount_paid = amount_paid_override if amount_paid_override is not None else plan.price_rub
     new_sub = UserSubscription(
         user_id=user_id,
         plan_id=plan.id,
         status="active",
-        amount_paid=plan.price_rub,
+        is_trial=is_trial,
+        amount_paid=amount_paid,
         started_at=started,
-        ends_at=add_days(started, plan.duration_days),
+        ends_at=add_days(started, duration_days),
     )
     db.add(new_sub)
     db.commit()
@@ -137,6 +150,29 @@ def get_available_bot_for_user(db: Session, user_id: int) -> TelegramBot | None:
         if bot.id not in used_bot_ids:
             return bot
     return None
+
+
+def get_trial_days(db: Session) -> int:
+    setting = db.scalar(select(AppSetting).where(AppSetting.key == TRIAL_DAYS_SETTING_KEY))
+    if not setting:
+        return DEFAULT_TRIAL_DAYS
+    try:
+        trial_days = int(setting.value)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, trial_days)
+
+
+def set_trial_days(db: Session, trial_days: int) -> int:
+    normalized = max(0, int(trial_days))
+    setting = db.scalar(select(AppSetting).where(AppSetting.key == TRIAL_DAYS_SETTING_KEY))
+    if not setting:
+        setting = AppSetting(key=TRIAL_DAYS_SETTING_KEY, value=str(normalized))
+        db.add(setting)
+    else:
+        setting.value = str(normalized)
+    db.commit()
+    return normalized
 
 
 def _send_telegram_message(bot_token: str, chat_id: int, text: str) -> bool:

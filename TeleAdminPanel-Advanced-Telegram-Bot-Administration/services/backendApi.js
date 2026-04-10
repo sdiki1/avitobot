@@ -36,6 +36,8 @@ exports.deleteProxy = (id) => request(`/proxies/${id}`, { method: 'DELETE' });
 
 exports.getUsers = () => request('/users');
 exports.getMonitorings = () => request('/monitorings');
+exports.getTrialSettings = () => request('/trial-settings');
+exports.updateTrialSettings = (payload) => request('/trial-settings', { method: 'PUT', body: JSON.stringify(payload) });
 
 exports.getBots = () => request('/bots');
 exports.createBot = (payload) => request('/bots', { method: 'POST', body: JSON.stringify(payload) });

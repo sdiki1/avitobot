@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 import hashlib
 import hmac
 import os
@@ -93,6 +94,24 @@ def _format_monitoring_status(monitoring: dict[str, Any]) -> str:
     )
 
 
+def _format_datetime_ru(value: str | None) -> str:
+    if not value:
+        return "—"
+    try:
+        normalized = value.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(normalized)
+        return dt.strftime("%d.%m.%Y %H:%M")
+    except Exception:
+        return value
+
+
+def _extract_start_arg(text: str | None) -> str:
+    parts = (text or "").split(maxsplit=1)
+    if len(parts) < 2:
+        return ""
+    return parts[1].strip().lower()
+
+
 class BackendAPI:
     def __init__(self) -> None:
         self.client = httpx.AsyncClient(timeout=30)
@@ -115,6 +134,15 @@ class BackendAPI:
         response.raise_for_status()
         payload = response.json()
         return payload if isinstance(payload, list) else []
+
+    async def get_profile(self, telegram_id: int) -> dict[str, Any]:
+        response = await self.client.get(
+            f"{BACKEND_URL}/api/v1/public/profile",
+            params={"telegram_id": telegram_id},
+        )
+        response.raise_for_status()
+        payload = response.json()
+        return payload if isinstance(payload, dict) else {}
 
     async def active_bots(self) -> list[dict[str, Any]]:
         response = await self.client.get(
@@ -201,7 +229,50 @@ def build_router(bot_id: int, backend: BackendAPI) -> Router:
             username=tg_user.username,
             full_name=tg_user.full_name,
         )
+        start_arg = _extract_start_arg(message.text)
         status_code, payload = await backend.current_monitoring(bot_id=bot_id, telegram_id=tg_user.id)
+
+        if start_arg == "subscription":
+            if status_code != 200:
+                if status_code == 404:
+                    await message.answer(
+                        "Подписка для этого бота пока не назначена.\n"
+                        "Купите мониторинг в miniapp, чтобы активировать этот бот."
+                    )
+                    return
+                await message.answer(f"Не удалось получить данные подписки: {_extract_error(payload)}")
+                return
+
+            try:
+                profile = await backend.get_profile(tg_user.id)
+            except Exception as exc:
+                logger.warning(f"Failed to load profile for subscription deep-link: {exc}")
+                profile = {}
+
+            subscription = profile.get("subscription") if isinstance(profile, dict) else None
+            if subscription:
+                trial_suffix = " (пробный период)" if subscription.get("is_trial") else ""
+                subscription_line = (
+                    f"Подписка: активна{trial_suffix}\n"
+                    f"План: {subscription.get('plan_name') or '—'}\n"
+                    f"До: {_format_datetime_ru(subscription.get('ends_at'))}\n"
+                    f"Лимит: {subscription.get('links_limit', 0)} мониторингов"
+                )
+            else:
+                subscription_line = "Подписка: неактивна"
+
+            text = (
+                "Данные подписки для этого бота:\n\n"
+                f"{subscription_line}\n\n"
+                f"{_format_monitoring_status(payload)}\n\n"
+                "Команды:\n"
+                "/start_monitoring - запустить мониторинг\n"
+                "/stop_monitoring - остановить мониторинг\n"
+                "/change_link <url> - поменять ссылку"
+            )
+            await message.answer(text, reply_markup=miniapp_keyboard(tg_user.id))
+            return
+
         if status_code == 200:
             text = (
                 "Этот бот привязан к вашему мониторингу.\n\n"

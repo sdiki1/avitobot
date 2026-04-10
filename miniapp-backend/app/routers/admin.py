@@ -14,12 +14,20 @@ from app.schemas import (
     TelegramBotCreate,
     TelegramBotResponse,
     TelegramBotUpdate,
+    TrialSettingsResponse,
+    TrialSettingsUpdate,
     TariffPlanCreate,
     TariffPlanResponse,
     TariffPlanUpdate,
 )
 from app.services.auth import require_admin_token
-from app.services.helpers import activate_user_subscription, get_or_create_user, now_utc
+from app.services.helpers import (
+    activate_user_subscription,
+    get_or_create_user,
+    get_trial_days,
+    now_utc,
+    set_trial_days,
+)
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin_token)])
 
@@ -72,6 +80,7 @@ def stats(db: Session = Depends(get_db)) -> dict:
     ) or 0
     payments_total = db.scalar(select(func.coalesce(func.sum(Payment.amount_rub), 0)).where(Payment.status == "completed")) or 0
     active_bots = db.scalar(select(func.count(TelegramBot.id)).where(TelegramBot.is_active.is_(True))) or 0
+    trial_days = get_trial_days(db)
 
     return {
         "users_count": users_count,
@@ -79,7 +88,19 @@ def stats(db: Session = Depends(get_db)) -> dict:
         "active_subscriptions": active_subscriptions,
         "payments_total_rub": payments_total,
         "active_bots": active_bots,
+        "trial_days": trial_days,
     }
+
+
+@router.get("/trial-settings", response_model=TrialSettingsResponse)
+def trial_settings(db: Session = Depends(get_db)) -> TrialSettingsResponse:
+    return TrialSettingsResponse(trial_days=get_trial_days(db))
+
+
+@router.put("/trial-settings", response_model=TrialSettingsResponse)
+def update_trial_settings(payload: TrialSettingsUpdate, db: Session = Depends(get_db)) -> TrialSettingsResponse:
+    updated_days = set_trial_days(db, payload.trial_days)
+    return TrialSettingsResponse(trial_days=updated_days)
 
 
 @router.get("/users")

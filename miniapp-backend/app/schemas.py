@@ -198,6 +198,15 @@ class PurchaseSubscriptionResponse(BaseModel):
     user_id: int
     plan_id: int
     ends_at: datetime
+    is_trial: bool = False
+
+
+class TrialSettingsResponse(BaseModel):
+    trial_days: int = Field(ge=0)
+
+
+class TrialSettingsUpdate(BaseModel):
+    trial_days: int = Field(ge=0)
 
 
 class InternalParsedItem(BaseModel):

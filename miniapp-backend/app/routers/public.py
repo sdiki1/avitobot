@@ -24,6 +24,7 @@ from app.services.helpers import (
     get_active_subscription_query,
     get_available_bot_for_user,
     get_or_create_user,
+    get_trial_days,
     parse_miniapp_auth_token,
     send_subscription_assigned_bot_message,
 )
@@ -167,6 +168,7 @@ def profile(telegram_id: int = Query(...), db: Session = Depends(get_db)) -> dic
             "plan_id": subscription.plan_id,
             "ends_at": subscription.ends_at,
             "status": subscription.status,
+            "is_trial": subscription.is_trial,
             "links_limit": subscription.plan.links_limit if subscription.plan else 0,
             "plan_name": subscription.plan.name if subscription.plan else "Без тарифа",
         }
@@ -259,15 +261,26 @@ def purchase_subscription(
     if not plan or not plan.is_active:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="План не найден или неактивен")
 
+    existing_subscriptions = db.scalar(select(func.count(UserSubscription.id)).where(UserSubscription.user_id == user.id)) or 0
+    trial_days = get_trial_days(db)
+    use_trial = trial_days > 0 and existing_subscriptions == 0
+
     payment = Payment(
         user_id=user.id,
         plan_id=plan.id,
-        amount_rub=plan.price_rub,
+        amount_rub=0 if use_trial else plan.price_rub,
         status="completed",
-        provider="miniapp",
+        provider="trial" if use_trial else "miniapp",
     )
     db.add(payment)
-    subscription = activate_user_subscription(db, user.id, plan)
+    subscription = activate_user_subscription(
+        db,
+        user.id,
+        plan,
+        duration_days_override=trial_days if use_trial else None,
+        amount_paid_override=0 if use_trial else plan.price_rub,
+        is_trial=use_trial,
+    )
     send_subscription_assigned_bot_message(db, user)
     return PurchaseSubscriptionResponse(
         ok=True,
@@ -275,6 +288,7 @@ def purchase_subscription(
         user_id=user.id,
         plan_id=plan.id,
         ends_at=subscription.ends_at,
+        is_trial=subscription.is_trial,
     )
 
 
