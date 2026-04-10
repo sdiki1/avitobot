@@ -3,8 +3,8 @@ import hashlib
 import hmac
 import json
 import logging
-from urllib import request as urllib_request
 
+import httpx
 from sqlalchemy import Select, and_, func, select
 from sqlalchemy.orm import Session
 
@@ -264,22 +264,18 @@ def set_miniapp_content_settings(db: Session, updates: dict[str, str]) -> dict[s
 
 
 def _send_telegram_message(bot_token: str, chat_id: int, text: str) -> bool:
-    payload = json.dumps(
-        {
-            "chat_id": chat_id,
-            "text": text,
-            "disable_web_page_preview": True,
-        }
-    ).encode("utf-8")
-    req = urllib_request.Request(
-        f"https://api.telegram.org/bot{bot_token}/sendMessage",
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
     try:
-        with urllib_request.urlopen(req, timeout=10) as response:
-            return 200 <= response.status < 300
+        proxy = (settings.telegram_socks_proxy or "").strip() or None
+        with httpx.Client(timeout=10, proxy=proxy) as client:
+            response = client.post(
+                f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                json={
+                    "chat_id": chat_id,
+                    "text": text,
+                    "disable_web_page_preview": True,
+                },
+            )
+            return 200 <= response.status_code < 300
     except Exception as exc:
         logger.warning("Failed to send telegram message: %s", exc)
         return False
