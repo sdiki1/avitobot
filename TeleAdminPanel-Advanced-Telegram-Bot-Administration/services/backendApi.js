@@ -38,6 +38,8 @@ exports.getUsers = () => request('/users');
 exports.getMonitorings = () => request('/monitorings');
 exports.getTrialSettings = () => request('/trial-settings');
 exports.updateTrialSettings = (payload) => request('/trial-settings', { method: 'PUT', body: JSON.stringify(payload) });
+exports.getMiniappContent = () => request('/miniapp-content');
+exports.updateMiniappContent = (payload) => request('/miniapp-content', { method: 'PUT', body: JSON.stringify(payload) });
 
 exports.getBots = () => request('/bots');
 exports.createBot = (payload) => request('/bots', { method: 'POST', body: JSON.stringify(payload) });

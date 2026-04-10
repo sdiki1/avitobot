@@ -209,6 +209,45 @@ class TrialSettingsUpdate(BaseModel):
     trial_days: int = Field(ge=0)
 
 
+class MiniAppInfoLink(BaseModel):
+    key: str
+    title: str
+    url: str
+
+
+class MiniAppContentResponse(BaseModel):
+    support_title: str
+    support_url: str
+    faq_title: str
+    faq_url: str
+    news_title: str
+    news_url: str
+    terms_title: str
+    terms_url: str
+    privacy_title: str
+    privacy_url: str
+    subscriptions_title: str
+    subscriptions_hint: str
+    profile_title: str
+    info_links: list[MiniAppInfoLink] = Field(default_factory=list)
+
+
+class MiniAppContentUpdate(BaseModel):
+    support_title: str = Field(min_length=1, max_length=120)
+    support_url: str = Field(min_length=1, max_length=512)
+    faq_title: str = Field(min_length=1, max_length=120)
+    faq_url: str = Field(min_length=1, max_length=512)
+    news_title: str = Field(min_length=1, max_length=120)
+    news_url: str = Field(min_length=1, max_length=512)
+    terms_title: str = Field(min_length=1, max_length=120)
+    terms_url: str = Field(min_length=1, max_length=512)
+    privacy_title: str = Field(min_length=1, max_length=120)
+    privacy_url: str = Field(min_length=1, max_length=512)
+    subscriptions_title: str = Field(min_length=1, max_length=120)
+    subscriptions_hint: str = Field(min_length=1, max_length=300)
+    profile_title: str = Field(min_length=1, max_length=120)
+
+
 class InternalParsedItem(BaseModel):
     avito_ad_id: str
     title: str

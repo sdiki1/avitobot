@@ -6,6 +6,7 @@ from app.database import get_db
 from app.models import Monitoring, MonitoringItem, Notification, Payment, TariffPlan, TelegramBot, User, UserSubscription
 from app.schemas import (
     BotReference,
+    MiniAppContentResponse,
     MonitoringCreate,
     MonitoringItemResponse,
     MonitoringPurchaseRequest,
@@ -22,6 +23,7 @@ from app.services.helpers import (
     activate_user_subscription,
     ensure_subscription_monitoring_slots,
     ensure_user_referral_code,
+    get_miniapp_content_settings,
     get_active_subscription_query,
     get_available_bot_for_user,
     get_or_create_user,
@@ -64,6 +66,31 @@ def _monitoring_to_schema(mon: Monitoring) -> MonitoringResponse:
         link_configured=mon.link_configured,
         last_checked_at=mon.last_checked_at,
         bot=_to_bot_ref(mon.bot),
+    )
+
+
+def _miniapp_content_response(values: dict[str, str]) -> MiniAppContentResponse:
+    return MiniAppContentResponse(
+        support_title=values["miniapp_info_support_title"],
+        support_url=values["miniapp_info_support_url"],
+        faq_title=values["miniapp_info_faq_title"],
+        faq_url=values["miniapp_info_faq_url"],
+        news_title=values["miniapp_info_news_title"],
+        news_url=values["miniapp_info_news_url"],
+        terms_title=values["miniapp_info_terms_title"],
+        terms_url=values["miniapp_info_terms_url"],
+        privacy_title=values["miniapp_info_privacy_title"],
+        privacy_url=values["miniapp_info_privacy_url"],
+        subscriptions_title=values["miniapp_subscriptions_title"],
+        subscriptions_hint=values["miniapp_subscriptions_hint"],
+        profile_title=values["miniapp_profile_title"],
+        info_links=[
+            {"key": "support", "title": values["miniapp_info_support_title"], "url": values["miniapp_info_support_url"]},
+            {"key": "faq", "title": values["miniapp_info_faq_title"], "url": values["miniapp_info_faq_url"]},
+            {"key": "news", "title": values["miniapp_info_news_title"], "url": values["miniapp_info_news_url"]},
+            {"key": "terms", "title": values["miniapp_info_terms_title"], "url": values["miniapp_info_terms_url"]},
+            {"key": "privacy", "title": values["miniapp_info_privacy_title"], "url": values["miniapp_info_privacy_url"]},
+        ],
     )
 
 
@@ -122,6 +149,12 @@ def resolve_auth(auth: str = Query(...), db: Session = Depends(get_db)) -> Teleg
 @router.get("/plans", response_model=list[TariffPlanResponse])
 def list_plans(db: Session = Depends(get_db)) -> list[TariffPlan]:
     return list(db.scalars(select(TariffPlan).where(TariffPlan.is_active.is_(True)).order_by(TariffPlan.price_rub.asc())))
+
+
+@router.get("/miniapp-content", response_model=MiniAppContentResponse)
+def miniapp_content(db: Session = Depends(get_db)) -> MiniAppContentResponse:
+    values = get_miniapp_content_settings(db)
+    return _miniapp_content_response(values)
 
 
 @router.get("/profile")

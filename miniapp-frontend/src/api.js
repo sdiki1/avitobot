@@ -22,6 +22,11 @@ export async function getPlans() {
   return data
 }
 
+export async function getMiniappContent() {
+  const { data } = await client.get('/miniapp-content')
+  return data
+}
+
 export async function getProfile(telegramId) {
   const { data } = await client.get('/profile', { params: { telegram_id: telegramId } })
   return data

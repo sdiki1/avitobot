@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   authTelegramUser,
+  getMiniappContent,
   getMonitorings,
   getPlans,
   getProfile,
@@ -17,6 +18,29 @@ const TABS = {
 const SUBSCRIPTION_VIEW = {
   home: 'home',
   buy: 'buy',
+}
+
+const DEFAULT_MINIAPP_CONTENT = {
+  support_title: 'Поддержка',
+  support_url: 'https://t.me/your_support',
+  faq_title: 'Частые вопросы',
+  faq_url: 'https://t.me/your_faq',
+  news_title: 'Новостной канал',
+  news_url: 'https://t.me/your_news',
+  terms_title: 'Пользовательское соглашение',
+  terms_url: 'https://t.me/your_terms',
+  privacy_title: 'Политика конфиденциальности',
+  privacy_url: 'https://t.me/your_privacy',
+  subscriptions_title: 'Подписки',
+  subscriptions_hint: 'Управление тарифом и переход к назначенным ботам.',
+  profile_title: 'Профиль',
+  info_links: [
+    { key: 'support', title: 'Поддержка', url: 'https://t.me/your_support' },
+    { key: 'faq', title: 'Частые вопросы', url: 'https://t.me/your_faq' },
+    { key: 'news', title: 'Новостной канал', url: 'https://t.me/your_news' },
+    { key: 'terms', title: 'Пользовательское соглашение', url: 'https://t.me/your_terms' },
+    { key: 'privacy', title: 'Политика конфиденциальности', url: 'https://t.me/your_privacy' },
+  ],
 }
 
 function telegramUser() {
@@ -72,6 +96,7 @@ export default function App() {
   const [plans, setPlans] = useState([])
   const [profile, setProfile] = useState(null)
   const [monitorings, setMonitorings] = useState([])
+  const [miniappContent, setMiniappContent] = useState(DEFAULT_MINIAPP_CONTENT)
   const [selectedPlanId, setSelectedPlanId] = useState('')
   const [purchaseBusy, setPurchaseBusy] = useState(false)
 
@@ -81,14 +106,16 @@ export default function App() {
   )
 
   const loadData = async (tgId) => {
-    const [profileData, plansData, monitoringsData] = await Promise.all([
+    const [profileData, plansData, monitoringsData, contentData] = await Promise.all([
       getProfile(tgId),
       getPlans(),
       getMonitorings(tgId),
+      getMiniappContent().catch(() => DEFAULT_MINIAPP_CONTENT),
     ])
     setProfile(profileData)
     setPlans(plansData)
     setMonitorings(monitoringsData)
+    setMiniappContent(contentData || DEFAULT_MINIAPP_CONTENT)
     if (!selectedPlanId && plansData.length > 0) {
       setSelectedPlanId(String(plansData[0].id))
     }
@@ -190,11 +217,9 @@ export default function App() {
               <h2>Информация</h2>
               <p className="muted">Основные ссылки сервиса.</p>
               <div className="links">
-                <a href="https://t.me/your_support" target="_blank" rel="noreferrer">Поддержка</a>
-                <a href="https://t.me/your_faq" target="_blank" rel="noreferrer">Частые вопросы</a>
-                <a href="https://t.me/your_news" target="_blank" rel="noreferrer">Новостной канал</a>
-                <a href="https://t.me/your_terms" target="_blank" rel="noreferrer">Пользовательское соглашение</a>
-                <a href="https://t.me/your_privacy" target="_blank" rel="noreferrer">Политика конфиденциальности</a>
+                {(miniappContent?.info_links || DEFAULT_MINIAPP_CONTENT.info_links).map((item) => (
+                  <a key={item.key} href={item.url} target="_blank" rel="noreferrer">{item.title}</a>
+                ))}
               </div>
             </article>
           </section>
@@ -204,7 +229,8 @@ export default function App() {
           <section className="stack">
             {subscriptionView === SUBSCRIPTION_VIEW.home && (
               <article className="card subscription-home">
-                <h2>Подписки</h2>
+                <h2>{miniappContent?.subscriptions_title || 'Подписки'}</h2>
+                <p className="muted">{miniappContent?.subscriptions_hint || 'Управление тарифом и назначенными ботами.'}</p>
                 <p className="muted">
                   Текущая подписка:{' '}
                   {profile?.subscription
@@ -315,7 +341,7 @@ export default function App() {
         {!loading && tab === TABS.profile && (
           <section className="stack">
             <article className="card">
-              <h2>Профиль</h2>
+              <h2>{miniappContent?.profile_title || 'Профиль'}</h2>
               <div className="profile-list">
                 <div className="profile-row">
                   <span>Telegram ID</span>

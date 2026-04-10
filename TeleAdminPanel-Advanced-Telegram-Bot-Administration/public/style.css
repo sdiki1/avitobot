@@ -261,3 +261,15 @@ select:focus {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   color: var(--muted); font-size: 12px; margin-top: 2px;
 }
+
+.content-editor {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  background: #fcfffe;
+}
+
+.content-editor h3 {
+  margin: 0 0 10px;
+  font-size: 16px;
+}

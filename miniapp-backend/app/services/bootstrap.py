@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import Base, engine
 from app.models import AppSetting, TariffPlan, TelegramBot
-from app.services.helpers import DEFAULT_TRIAL_DAYS, TRIAL_DAYS_SETTING_KEY
+from app.services.helpers import DEFAULT_TRIAL_DAYS, MINIAPP_CONTENT_DEFAULTS, TRIAL_DAYS_SETTING_KEY
 
 
 DEFAULT_PLANS = [
@@ -90,4 +90,13 @@ def seed_default_plans(db: Session) -> None:
     trial_setting = db.scalar(select(AppSetting).where(AppSetting.key == TRIAL_DAYS_SETTING_KEY))
     if not trial_setting:
         db.add(AppSetting(key=TRIAL_DAYS_SETTING_KEY, value=str(DEFAULT_TRIAL_DAYS)))
+
+    existing_settings = {
+        row.key: row.value
+        for row in db.scalars(select(AppSetting).where(AppSetting.key.in_(list(MINIAPP_CONTENT_DEFAULTS.keys())))).all()
+    }
+    for key, default_value in MINIAPP_CONTENT_DEFAULTS.items():
+        if key in existing_settings:
+            continue
+        db.add(AppSetting(key=key, value=default_value))
     db.commit()

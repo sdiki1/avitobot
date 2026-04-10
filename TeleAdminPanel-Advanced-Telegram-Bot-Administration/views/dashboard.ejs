@@ -66,6 +66,64 @@
 </section>
 
 <section class="card">
+  <h2>Контент MiniApp</h2>
+  <p class="muted">Заполняйте блоки miniapp: Информация, Подписки и Профиль.</p>
+  <form class="stack" action="<%= adminBase %>/miniapp-content/update" method="post">
+    <div class="content-editor">
+      <h3>Блок «Информация»</h3>
+      <div class="form-grid two">
+        <input name="support_title" value="<%= miniappContent?.support_title || '' %>" placeholder="Поддержка: заголовок" required />
+        <input name="support_url" value="<%= miniappContent?.support_url || '' %>" placeholder="Поддержка: URL" required />
+
+        <input name="faq_title" value="<%= miniappContent?.faq_title || '' %>" placeholder="FAQ: заголовок" required />
+        <input name="faq_url" value="<%= miniappContent?.faq_url || '' %>" placeholder="FAQ: URL" required />
+
+        <input name="news_title" value="<%= miniappContent?.news_title || '' %>" placeholder="Новости: заголовок" required />
+        <input name="news_url" value="<%= miniappContent?.news_url || '' %>" placeholder="Новости: URL" required />
+
+        <input name="terms_title" value="<%= miniappContent?.terms_title || '' %>" placeholder="Соглашение: заголовок" required />
+        <input name="terms_url" value="<%= miniappContent?.terms_url || '' %>" placeholder="Соглашение: URL" required />
+
+        <input name="privacy_title" value="<%= miniappContent?.privacy_title || '' %>" placeholder="Privacy: заголовок" required />
+        <input name="privacy_url" value="<%= miniappContent?.privacy_url || '' %>" placeholder="Privacy: URL" required />
+      </div>
+    </div>
+
+    <div class="content-editor">
+      <h3>Блок «Подписки»</h3>
+      <div class="form-grid two">
+        <input
+          name="subscriptions_title"
+          value="<%= miniappContent?.subscriptions_title || '' %>"
+          placeholder="Заголовок блока подписок"
+          required
+        />
+        <input
+          name="subscriptions_hint"
+          value="<%= miniappContent?.subscriptions_hint || '' %>"
+          placeholder="Подпись под заголовком"
+          required
+        />
+      </div>
+    </div>
+
+    <div class="content-editor">
+      <h3>Блок «Профиль»</h3>
+      <div class="form-grid two">
+        <input
+          name="profile_title"
+          value="<%= miniappContent?.profile_title || '' %>"
+          placeholder="Заголовок блока профиля"
+          required
+        />
+      </div>
+    </div>
+
+    <button type="submit">Сохранить контент MiniApp</button>
+  </form>
+</section>
+
+<section class="card">
   <h2>Подключенные боты</h2>
   <div class="table-wrap">
     <table class="table">

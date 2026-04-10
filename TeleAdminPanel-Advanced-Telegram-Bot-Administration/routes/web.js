@@ -3,6 +3,21 @@ const api = require('../services/backendApi');
 
 const router = express.Router();
 const ADMIN_BASE_PATH = process.env.ADMIN_BASE_PATH || "/admin";
+const DEFAULT_MINIAPP_CONTENT = {
+  support_title: 'Поддержка',
+  support_url: 'https://t.me/your_support',
+  faq_title: 'Частые вопросы',
+  faq_url: 'https://t.me/your_faq',
+  news_title: 'Новостной канал',
+  news_url: 'https://t.me/your_news',
+  terms_title: 'Пользовательское соглашение',
+  terms_url: 'https://t.me/your_terms',
+  privacy_title: 'Политика конфиденциальности',
+  privacy_url: 'https://t.me/your_privacy',
+  subscriptions_title: 'Подписки',
+  subscriptions_hint: 'Управление тарифом и переход к назначенным ботам.',
+  profile_title: 'Профиль',
+};
 
 function toInt(value) {
   const parsed = Number(value);
@@ -16,14 +31,24 @@ function withAdminBase(path) {
 
 router.get('/', async (req, res) => {
   try {
-    const [stats, plans, proxies, bots, trialSettings] = await Promise.all([
+    const [stats, plans, proxies, bots, trialSettings, miniappContent] = await Promise.all([
       api.getStats(),
       api.getPlans(),
       api.getProxies(),
       api.getBots(),
       api.getTrialSettings(),
+      api.getMiniappContent(),
     ]);
-    res.render('dashboard', { stats, plans, proxies, bots, trialSettings, error: null, success: req.query.success || null });
+    res.render('dashboard', {
+      stats,
+      plans,
+      proxies,
+      bots,
+      trialSettings,
+      miniappContent,
+      error: null,
+      success: req.query.success || null,
+    });
   } catch (error) {
     res.render('dashboard', {
       stats: { users_count: 0, active_monitorings: 0, active_subscriptions: 0, payments_total_rub: 0, active_bots: 0 },
@@ -31,6 +56,7 @@ router.get('/', async (req, res) => {
       proxies: [],
       bots: [],
       trialSettings: { trial_days: 0 },
+      miniappContent: DEFAULT_MINIAPP_CONTENT,
       error: error.message,
       success: null,
     });
@@ -242,6 +268,29 @@ router.post('/trial-settings/update', async (req, res) => {
       trial_days: toInt(req.body.trial_days) || 0,
     });
     res.redirect(withAdminBase('/?success=Пробный+период+обновлен'));
+  } catch (error) {
+    res.redirect(withAdminBase(`/?success=${encodeURIComponent(`Ошибка: ${error.message}`)}`));
+  }
+});
+
+router.post('/miniapp-content/update', async (req, res) => {
+  try {
+    await api.updateMiniappContent({
+      support_title: req.body.support_title,
+      support_url: req.body.support_url,
+      faq_title: req.body.faq_title,
+      faq_url: req.body.faq_url,
+      news_title: req.body.news_title,
+      news_url: req.body.news_url,
+      terms_title: req.body.terms_title,
+      terms_url: req.body.terms_url,
+      privacy_title: req.body.privacy_title,
+      privacy_url: req.body.privacy_url,
+      subscriptions_title: req.body.subscriptions_title,
+      subscriptions_hint: req.body.subscriptions_hint,
+      profile_title: req.body.profile_title,
+    });
+    res.redirect(withAdminBase('/?success=Контент+miniapp+обновлен'));
   } catch (error) {
     res.redirect(withAdminBase(`/?success=${encodeURIComponent(`Ошибка: ${error.message}`)}`));
   }

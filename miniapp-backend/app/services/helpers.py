@@ -15,6 +15,22 @@ logger = logging.getLogger(__name__)
 TRIAL_DAYS_SETTING_KEY = "trial_days"
 DEFAULT_TRIAL_DAYS = 3
 
+MINIAPP_CONTENT_DEFAULTS = {
+    "miniapp_info_support_title": "Поддержка",
+    "miniapp_info_support_url": "https://t.me/your_support",
+    "miniapp_info_faq_title": "Частые вопросы",
+    "miniapp_info_faq_url": "https://t.me/your_faq",
+    "miniapp_info_news_title": "Новостной канал",
+    "miniapp_info_news_url": "https://t.me/your_news",
+    "miniapp_info_terms_title": "Пользовательское соглашение",
+    "miniapp_info_terms_url": "https://t.me/your_terms",
+    "miniapp_info_privacy_title": "Политика конфиденциальности",
+    "miniapp_info_privacy_url": "https://t.me/your_privacy",
+    "miniapp_subscriptions_title": "Подписки",
+    "miniapp_subscriptions_hint": "Управление тарифом и переход к назначенным ботам.",
+    "miniapp_profile_title": "Профиль",
+}
+
 
 def now_utc() -> datetime:
     return datetime.now(timezone.utc)
@@ -210,6 +226,41 @@ def set_trial_days(db: Session, trial_days: int) -> int:
         setting.value = str(normalized)
     db.commit()
     return normalized
+
+
+def get_miniapp_content_settings(db: Session) -> dict[str, str]:
+    keys = list(MINIAPP_CONTENT_DEFAULTS.keys())
+    rows = db.scalars(select(AppSetting).where(AppSetting.key.in_(keys))).all()
+    values = {row.key: row.value for row in rows}
+    return {
+        key: (values.get(key) if values.get(key) not in (None, "") else default)
+        for key, default in MINIAPP_CONTENT_DEFAULTS.items()
+    }
+
+
+def set_miniapp_content_settings(db: Session, updates: dict[str, str]) -> dict[str, str]:
+    if not updates:
+        return get_miniapp_content_settings(db)
+
+    keys = [key for key in updates.keys() if key in MINIAPP_CONTENT_DEFAULTS]
+    if not keys:
+        return get_miniapp_content_settings(db)
+
+    rows = db.scalars(select(AppSetting).where(AppSetting.key.in_(keys))).all()
+    existing_by_key = {row.key: row for row in rows}
+
+    for key in keys:
+        raw_value = updates.get(key, "")
+        normalized = (raw_value or "").strip()
+        value = normalized if normalized else MINIAPP_CONTENT_DEFAULTS[key]
+        row = existing_by_key.get(key)
+        if row:
+            row.value = value
+        else:
+            db.add(AppSetting(key=key, value=value))
+
+    db.commit()
+    return get_miniapp_content_settings(db)
 
 
 def _send_telegram_message(bot_token: str, chat_id: int, text: str) -> bool:

@@ -6,6 +6,8 @@ from app.database import get_db
 from app.models import Monitoring, Payment, ProxyConfig, TariffPlan, TelegramBot, User, UserSubscription
 from app.schemas import (
     ActivateSubscriptionRequest,
+    MiniAppContentResponse,
+    MiniAppContentUpdate,
     PaymentCreate,
     PaymentResponse,
     ProxyCreate,
@@ -24,9 +26,11 @@ from app.services.auth import require_admin_token
 from app.services.helpers import (
     activate_user_subscription,
     ensure_subscription_monitoring_slots,
+    get_miniapp_content_settings,
     get_or_create_user,
     get_trial_days,
     now_utc,
+    set_miniapp_content_settings,
     set_trial_days,
 )
 
@@ -57,6 +61,31 @@ def _set_primary_bot(db: Session, target_bot_id: int) -> None:
     bots = db.scalars(select(TelegramBot).order_by(TelegramBot.id.asc())).all()
     for bot in bots:
         bot.is_primary = bot.id == target_bot_id
+
+
+def _miniapp_content_response(values: dict[str, str]) -> MiniAppContentResponse:
+    return MiniAppContentResponse(
+        support_title=values["miniapp_info_support_title"],
+        support_url=values["miniapp_info_support_url"],
+        faq_title=values["miniapp_info_faq_title"],
+        faq_url=values["miniapp_info_faq_url"],
+        news_title=values["miniapp_info_news_title"],
+        news_url=values["miniapp_info_news_url"],
+        terms_title=values["miniapp_info_terms_title"],
+        terms_url=values["miniapp_info_terms_url"],
+        privacy_title=values["miniapp_info_privacy_title"],
+        privacy_url=values["miniapp_info_privacy_url"],
+        subscriptions_title=values["miniapp_subscriptions_title"],
+        subscriptions_hint=values["miniapp_subscriptions_hint"],
+        profile_title=values["miniapp_profile_title"],
+        info_links=[
+            {"key": "support", "title": values["miniapp_info_support_title"], "url": values["miniapp_info_support_url"]},
+            {"key": "faq", "title": values["miniapp_info_faq_title"], "url": values["miniapp_info_faq_url"]},
+            {"key": "news", "title": values["miniapp_info_news_title"], "url": values["miniapp_info_news_url"]},
+            {"key": "terms", "title": values["miniapp_info_terms_title"], "url": values["miniapp_info_terms_url"]},
+            {"key": "privacy", "title": values["miniapp_info_privacy_title"], "url": values["miniapp_info_privacy_url"]},
+        ],
+    )
 
 
 def _ensure_primary_bot_exists(db: Session) -> None:
@@ -102,6 +131,35 @@ def trial_settings(db: Session = Depends(get_db)) -> TrialSettingsResponse:
 def update_trial_settings(payload: TrialSettingsUpdate, db: Session = Depends(get_db)) -> TrialSettingsResponse:
     updated_days = set_trial_days(db, payload.trial_days)
     return TrialSettingsResponse(trial_days=updated_days)
+
+
+@router.get("/miniapp-content", response_model=MiniAppContentResponse)
+def get_miniapp_content(db: Session = Depends(get_db)) -> MiniAppContentResponse:
+    values = get_miniapp_content_settings(db)
+    return _miniapp_content_response(values)
+
+
+@router.put("/miniapp-content", response_model=MiniAppContentResponse)
+def update_miniapp_content(payload: MiniAppContentUpdate, db: Session = Depends(get_db)) -> MiniAppContentResponse:
+    values = set_miniapp_content_settings(
+        db,
+        {
+            "miniapp_info_support_title": payload.support_title,
+            "miniapp_info_support_url": payload.support_url,
+            "miniapp_info_faq_title": payload.faq_title,
+            "miniapp_info_faq_url": payload.faq_url,
+            "miniapp_info_news_title": payload.news_title,
+            "miniapp_info_news_url": payload.news_url,
+            "miniapp_info_terms_title": payload.terms_title,
+            "miniapp_info_terms_url": payload.terms_url,
+            "miniapp_info_privacy_title": payload.privacy_title,
+            "miniapp_info_privacy_url": payload.privacy_url,
+            "miniapp_subscriptions_title": payload.subscriptions_title,
+            "miniapp_subscriptions_hint": payload.subscriptions_hint,
+            "miniapp_profile_title": payload.profile_title,
+        },
+    )
+    return _miniapp_content_response(values)
 
 
 @router.get("/users")
