@@ -238,7 +238,7 @@ def bot_start_monitoring(payload: InternalBotCommandRequest, db: Session = Depen
     if not monitoring.link_configured:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Сначала задайте ссылку командой /change_link <url>",
+            detail="Сначала задайте ссылку командой /change_link https://www.avito.ru/...",
         )
     monitoring.is_active = True
     db.commit()

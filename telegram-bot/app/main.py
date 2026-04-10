@@ -11,11 +11,21 @@ from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
-from aiogram import Bot, Dispatcher, Router
+from aiogram import Bot, Dispatcher, F, Router
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandStart
-from aiogram.types import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Message, WebAppInfo
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import (
+    BotCommand,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    Message,
+    ReplyKeyboardMarkup,
+    WebAppInfo,
+)
 from aiogram.utils.token import TokenValidationError, validate_token
 from loguru import logger
 
@@ -26,6 +36,13 @@ MINIAPP_PUBLIC_URL = os.getenv("MINIAPP_PUBLIC_URL", "http://localhost")
 MINIAPP_AUTH_SECRET = os.getenv("MINIAPP_AUTH_SECRET", "change_me_miniapp_auth_secret")
 BOTS_REFRESH_SEC = int(os.getenv("BOTS_REFRESH_SEC", "15"))
 NOTIFY_POLL_SEC = int(os.getenv("NOTIFY_POLL_SEC", "4"))
+
+BTN_START_MONITORING = "▶️ Запустить мониторинг"
+BTN_STOP_MONITORING = "⏹ Остановить мониторинг"
+BTN_STATUS = "📊 Статус"
+BTN_CHANGE_LINK = "🔗 Поменять ссылку"
+BTN_OPEN_MINIAPP = "📱 Открыть MiniApp"
+BTN_CANCEL_CHANGE = "✖️ Отмена изменения"
 
 
 def has_valid_bot_token(token: str) -> bool:
@@ -61,6 +78,28 @@ def miniapp_keyboard(telegram_id: int) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="Открыть MiniApp", web_app=WebAppInfo(url=build_miniapp_url(telegram_id)))],
         ]
     )
+
+
+def monitoring_actions_keyboard(telegram_id: int, include_cancel: bool = False) -> ReplyKeyboardMarkup:
+    rows: list[list[KeyboardButton]] = []
+    if include_cancel:
+        rows.append([KeyboardButton(text=BTN_CANCEL_CHANGE)])
+    rows.extend(
+        [
+            [KeyboardButton(text=BTN_START_MONITORING), KeyboardButton(text=BTN_STOP_MONITORING)],
+            [KeyboardButton(text=BTN_STATUS), KeyboardButton(text=BTN_CHANGE_LINK)],
+            [KeyboardButton(text=BTN_OPEN_MINIAPP, web_app=WebAppInfo(url=build_miniapp_url(telegram_id)))],
+        ]
+    )
+    return ReplyKeyboardMarkup(
+        keyboard=rows,
+        resize_keyboard=True,
+        input_field_placeholder="Выберите действие",
+    )
+
+
+class LinkChangeState(StatesGroup):
+    waiting_url = State()
 
 
 def _response_json(response: httpx.Response) -> dict[str, Any]:
@@ -110,6 +149,11 @@ def _extract_start_arg(text: str | None) -> str:
     if len(parts) < 2:
         return ""
     return parts[1].strip().lower()
+
+
+def _looks_like_url(value: str) -> bool:
+    lowered = value.lower()
+    return lowered.startswith("http://") or lowered.startswith("https://")
 
 
 class BackendAPI:
@@ -221,8 +265,75 @@ class BackendAPI:
 def build_router(bot_id: int, backend: BackendAPI) -> Router:
     router = Router()
 
+    async def _show_status(message: Message) -> None:
+        status_code, payload = await backend.current_monitoring(bot_id=bot_id, telegram_id=message.from_user.id)
+        if status_code == 200:
+            await message.answer(
+                _format_monitoring_status(payload),
+                reply_markup=monitoring_actions_keyboard(message.from_user.id),
+            )
+            return
+        await message.answer(
+            f"Не удалось получить статус: {_extract_error(payload)}",
+            reply_markup=monitoring_actions_keyboard(message.from_user.id),
+        )
+
+    async def _start_monitoring(message: Message) -> None:
+        status_code, payload = await backend.start_monitoring(bot_id=bot_id, telegram_id=message.from_user.id)
+        if status_code == 200:
+            await message.answer(
+                f"Мониторинг запущен.\n\n{_format_monitoring_status(payload)}",
+                reply_markup=monitoring_actions_keyboard(message.from_user.id),
+            )
+            return
+        await message.answer(
+            f"Не удалось запустить: {_extract_error(payload)}",
+            reply_markup=monitoring_actions_keyboard(message.from_user.id),
+        )
+
+    async def _stop_monitoring(message: Message) -> None:
+        status_code, payload = await backend.stop_monitoring(bot_id=bot_id, telegram_id=message.from_user.id)
+        if status_code == 200:
+            await message.answer(
+                f"Мониторинг остановлен.\n\n{_format_monitoring_status(payload)}",
+                reply_markup=monitoring_actions_keyboard(message.from_user.id),
+            )
+            return
+        await message.answer(
+            f"Не удалось остановить: {_extract_error(payload)}",
+            reply_markup=monitoring_actions_keyboard(message.from_user.id),
+        )
+
+    async def _apply_change_link(message: Message, url: str) -> bool:
+        status_code, payload = await backend.change_link(
+            bot_id=bot_id,
+            telegram_id=message.from_user.id,
+            url=url,
+        )
+        if status_code == 200:
+            await message.answer(
+                "Ссылка обновлена.\n"
+                f"{_format_monitoring_status(payload)}\n\n"
+                "Для запуска используйте кнопку «Запустить мониторинг».",
+                reply_markup=monitoring_actions_keyboard(message.from_user.id),
+            )
+            return True
+        await message.answer(
+            f"Не удалось изменить ссылку: {_extract_error(payload)}",
+            reply_markup=monitoring_actions_keyboard(message.from_user.id),
+        )
+        return False
+
+    async def _prompt_change_link(message: Message, state: FSMContext) -> None:
+        await state.set_state(LinkChangeState.waiting_url)
+        await message.answer(
+            "Отправьте новую ссылку на мониторинг (начинается с http:// или https://).",
+            reply_markup=monitoring_actions_keyboard(message.from_user.id, include_cancel=True),
+        )
+
     @router.message(CommandStart())
-    async def cmd_start(message: Message) -> None:
+    async def cmd_start(message: Message, state: FSMContext) -> None:
+        await state.clear()
         tg_user = message.from_user
         await backend.auth_user(
             telegram_id=tg_user.id,
@@ -256,39 +367,36 @@ def build_router(bot_id: int, backend: BackendAPI) -> Router:
                     if subscription:
                         await message.answer(
                             "Подписка активна, но этот бот не привязан к вашему мониторингу.\n"
-                            "Откройте назначенного бота из раздела Подписки в miniapp."
+                            "Откройте назначенного бота из раздела Подписки в miniapp.",
+                            reply_markup=monitoring_actions_keyboard(tg_user.id),
                         )
                         return
                     await message.answer(
                         "Активной подписки пока нет.\n"
-                        "Выберите тариф в miniapp, чтобы получить назначенного бота."
+                        "Выберите тариф в miniapp, чтобы получить назначенного бота.",
+                        reply_markup=monitoring_actions_keyboard(tg_user.id),
                     )
                     return
-                await message.answer(f"Не удалось получить данные подписки: {_extract_error(payload)}")
+                await message.answer(
+                    f"Не удалось получить данные подписки: {_extract_error(payload)}",
+                    reply_markup=monitoring_actions_keyboard(tg_user.id),
+                )
                 return
 
             text = (
                 "Данные подписки для этого бота:\n\n"
                 f"{subscription_line}\n\n"
                 f"{_format_monitoring_status(payload)}\n\n"
-                "Команды:\n"
-                "/start_monitoring - запустить мониторинг\n"
-                "/stop_monitoring - остановить мониторинг\n"
-                "/change_link <url> - поменять ссылку"
+                "Управляйте мониторингом кнопками ниже."
             )
-            await message.answer(text, reply_markup=miniapp_keyboard(tg_user.id))
+            await message.answer(text, reply_markup=monitoring_actions_keyboard(tg_user.id))
             return
 
         if status_code == 200:
             text = (
                 "Этот бот привязан к вашему мониторингу.\n\n"
                 f"{_format_monitoring_status(payload)}\n\n"
-                "Команды:\n"
-                "/start_monitoring - запустить мониторинг\n"
-                "/stop_monitoring - остановить мониторинг\n"
-                "/change_link <url> - поменять ссылку\n"
-                "/status - текущий статус\n"
-                "/miniapp - открыть miniapp"
+                "Управляйте мониторингом кнопками ниже."
             )
         elif status_code == 404:
             text = (
@@ -297,7 +405,7 @@ def build_router(bot_id: int, backend: BackendAPI) -> Router:
             )
         else:
             text = f"Не удалось получить мониторинг: {_extract_error(payload)}"
-        await message.answer(text, reply_markup=miniapp_keyboard(tg_user.id))
+        await message.answer(text, reply_markup=monitoring_actions_keyboard(tg_user.id))
 
     @router.message(Command("plans"))
     async def cmd_plans(message: Message) -> None:
@@ -314,52 +422,75 @@ def build_router(bot_id: int, backend: BackendAPI) -> Router:
 
     @router.message(Command("status"))
     async def cmd_status(message: Message) -> None:
-        status_code, payload = await backend.current_monitoring(bot_id=bot_id, telegram_id=message.from_user.id)
-        if status_code == 200:
-            await message.answer(_format_monitoring_status(payload))
-            return
-        await message.answer(f"Не удалось получить статус: {_extract_error(payload)}")
+        await _show_status(message)
 
     @router.message(Command("start_monitoring"))
     async def cmd_start_monitoring(message: Message) -> None:
-        status_code, payload = await backend.start_monitoring(bot_id=bot_id, telegram_id=message.from_user.id)
-        if status_code == 200:
-            await message.answer(f"Мониторинг запущен.\n\n{_format_monitoring_status(payload)}")
-            return
-        await message.answer(f"Не удалось запустить: {_extract_error(payload)}")
+        await _start_monitoring(message)
 
     @router.message(Command("stop_monitoring"))
     async def cmd_stop_monitoring(message: Message) -> None:
-        status_code, payload = await backend.stop_monitoring(bot_id=bot_id, telegram_id=message.from_user.id)
-        if status_code == 200:
-            await message.answer(f"Мониторинг остановлен.\n\n{_format_monitoring_status(payload)}")
-            return
-        await message.answer(f"Не удалось остановить: {_extract_error(payload)}")
+        await _stop_monitoring(message)
 
     @router.message(Command("change_link"))
-    async def cmd_change_link(message: Message) -> None:
+    async def cmd_change_link(message: Message, state: FSMContext) -> None:
         parts = (message.text or "").split(maxsplit=1)
         if len(parts) < 2:
-            await message.answer("Использование: /change_link https://www.avito.ru/...")
+            await _prompt_change_link(message, state)
             return
         url = parts[1].strip()
-        status_code, payload = await backend.change_link(
-            bot_id=bot_id,
-            telegram_id=message.from_user.id,
-            url=url,
-        )
-        if status_code == 200:
+        if not _looks_like_url(url):
             await message.answer(
-                "Ссылка обновлена.\n"
-                f"{_format_monitoring_status(payload)}\n\n"
-                "Для запуска используйте /start_monitoring"
+                "Ссылка должна начинаться с http:// или https://",
+                reply_markup=monitoring_actions_keyboard(message.from_user.id),
             )
             return
-        await message.answer(f"Не удалось изменить ссылку: {_extract_error(payload)}")
+        await state.clear()
+        await _apply_change_link(message, url)
+
+    @router.message(LinkChangeState.waiting_url)
+    async def on_change_link_input(message: Message, state: FSMContext) -> None:
+        value = (message.text or "").strip()
+        if value == BTN_CANCEL_CHANGE:
+            await state.clear()
+            await message.answer(
+                "Изменение ссылки отменено.",
+                reply_markup=monitoring_actions_keyboard(message.from_user.id),
+            )
+            return
+        if not _looks_like_url(value):
+            await message.answer(
+                "Нужна ссылка формата https://... Повторите ввод или нажмите «Отмена изменения».",
+                reply_markup=monitoring_actions_keyboard(message.from_user.id, include_cancel=True),
+            )
+            return
+
+        await state.clear()
+        await _apply_change_link(message, value)
+
+    @router.message(F.text == BTN_STATUS)
+    async def btn_status(message: Message) -> None:
+        await _show_status(message)
+
+    @router.message(F.text == BTN_START_MONITORING)
+    async def btn_start(message: Message) -> None:
+        await _start_monitoring(message)
+
+    @router.message(F.text == BTN_STOP_MONITORING)
+    async def btn_stop(message: Message) -> None:
+        await _stop_monitoring(message)
+
+    @router.message(F.text == BTN_CHANGE_LINK)
+    async def btn_change_link(message: Message, state: FSMContext) -> None:
+        await _prompt_change_link(message, state)
 
     @router.message(Command("miniapp"))
     async def cmd_miniapp(message: Message) -> None:
         await message.answer("Откройте miniapp", reply_markup=miniapp_keyboard(message.from_user.id))
+
+    @router.message(F.text == BTN_OPEN_MINIAPP)
+    async def btn_miniapp(message: Message) -> None:
+        await cmd_miniapp(message)
 
     return router
 
