@@ -13,7 +13,6 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import httpx
 from aiogram import Bot, Dispatcher, Router
 from aiogram.client.default import DefaultBotProperties
-from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandStart
 from aiogram.types import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Message, WebAppInfo
@@ -27,7 +26,6 @@ MINIAPP_PUBLIC_URL = os.getenv("MINIAPP_PUBLIC_URL", "http://localhost")
 MINIAPP_AUTH_SECRET = os.getenv("MINIAPP_AUTH_SECRET", "change_me_miniapp_auth_secret")
 BOTS_REFRESH_SEC = int(os.getenv("BOTS_REFRESH_SEC", "15"))
 NOTIFY_POLL_SEC = int(os.getenv("NOTIFY_POLL_SEC", "4"))
-TELEGRAM_SOCKS_PROXY = os.getenv("TELEGRAM_SOCKS_PROXY", "").strip()
 
 
 def has_valid_bot_token(token: str) -> bool:
@@ -387,14 +385,7 @@ class MultiBotManager:
             logger.error(f"Bot #{bot_id} has invalid token, skipping")
             return
 
-        bot_kwargs: dict[str, Any] = {
-            "token": token,
-            "default": DefaultBotProperties(parse_mode=ParseMode.HTML),
-        }
-        if TELEGRAM_SOCKS_PROXY:
-            bot_kwargs["session"] = AiohttpSession(proxy=TELEGRAM_SOCKS_PROXY)
-
-        bot = Bot(**bot_kwargs)
+        bot = Bot(token=token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
         try:
             me = await bot.get_me()
             await self.backend.sync_bot_metadata(bot_id=bot_id, telegram_bot_id=me.id, bot_username=me.username)
