@@ -77,30 +77,71 @@ class AvitoAdapter:
             return None
         return datetime.fromtimestamp(ms_timestamp / 1000, tz=timezone.utc)
 
+    def _proxy_candidates(self, monitoring: dict[str, Any]) -> list[str]:
+        raw_pool = monitoring.get("proxy_pool")
+        candidates: list[str] = []
+
+        if isinstance(raw_pool, list):
+            for raw in raw_pool:
+                if not isinstance(raw, str):
+                    continue
+                normalized = self._normalize_proxy_url(raw)
+                if normalized and normalized not in candidates:
+                    candidates.append(normalized)
+
+        raw_single = monitoring.get("proxy_url")
+        if isinstance(raw_single, str):
+            normalized_single = self._normalize_proxy_url(raw_single)
+            if normalized_single and normalized_single not in candidates:
+                candidates.insert(0, normalized_single)
+
+        return candidates
+
+    def _request_with_failover(self, url: str, monitoring: dict[str, Any]) -> requests.Response:
+        candidates = self._proxy_candidates(monitoring)
+        last_exc: Exception | None = None
+
+        for idx, proxy in enumerate(candidates, start=1):
+            proxy_label = f"{idx}/{len(candidates)}"
+            proxies = {"http": proxy, "https": proxy}
+            try:
+                response = requests.get(url, headers=HEADERS, timeout=25, proxies=proxies)
+                response.raise_for_status()
+                if idx > 1:
+                    logger.info(f"Recovered with fallback proxy {proxy_label} for url={url}")
+                return response
+            except requests.exceptions.HTTPError as exc:
+                status_code = exc.response.status_code if exc.response is not None else None
+                last_exc = exc
+                if status_code in {403, 429}:
+                    logger.warning(
+                        f"Proxy {proxy_label} blocked for url={url}: status={status_code}. Switching to next proxy."
+                    )
+                    continue
+                raise
+            except (requests.exceptions.ProxyError, requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
+                last_exc = exc
+                logger.warning(f"Proxy {proxy_label} failed for url={url}: {exc}. Switching to next proxy.")
+                continue
+            except requests.exceptions.InvalidSchema as exc:
+                last_exc = exc
+                if "SOCKS support" in str(exc):
+                    logger.warning(f"Proxy {proxy_label} has unsupported SOCKS schema: {exc}. Switching to next proxy.")
+                    continue
+                raise
+
+        if not candidates:
+            response = requests.get(url, headers=HEADERS, timeout=25)
+            response.raise_for_status()
+            return response
+
+        if last_exc is not None:
+            raise last_exc
+        raise RuntimeError(f"All proxies exhausted for url={url}")
+
     def parse_monitoring(self, monitoring: dict[str, Any]) -> list[dict[str, Any]]:
         url = monitoring["url"]
-        proxy_url = monitoring.get("proxy_url")
-
-        proxies = None
-        if proxy_url:
-            normalized_proxy = self._normalize_proxy_url(str(proxy_url))
-            proxies = {"http": normalized_proxy, "https": normalized_proxy}
-
-        try:
-            response = requests.get(url, headers=HEADERS, timeout=25, proxies=proxies)
-            response.raise_for_status()
-        except requests.exceptions.ProxyError as exc:
-            if not proxies:
-                raise
-            logger.warning(f"Proxy failed for url={url}: {exc}. Retrying without proxy.")
-            response = requests.get(url, headers=HEADERS, timeout=25)
-            response.raise_for_status()
-        except requests.exceptions.InvalidSchema as exc:
-            if not proxies or "SOCKS support" not in str(exc):
-                raise
-            logger.warning(f"SOCKS proxy is configured but dependencies are missing: {exc}. Retrying without proxy.")
-            response = requests.get(url, headers=HEADERS, timeout=25)
-            response.raise_for_status()
+        response = self._request_with_failover(url, monitoring)
 
         data = self.find_json_on_page(response.text)
         catalog = data.get("catalog") or {}

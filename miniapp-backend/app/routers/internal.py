@@ -111,6 +111,7 @@ def active_monitorings(db: Session = Depends(get_db)) -> list[dict]:
     proxies = db.scalars(select(ProxyConfig).where(ProxyConfig.is_active.is_(True)).order_by(ProxyConfig.id.asc())).all()
 
     payload = []
+    active_proxy_urls = [proxy.proxy_url for proxy in proxies if proxy.proxy_url]
     for mon in monitorings:
         user = db.get(User, mon.user_id)
         if not user:
@@ -142,6 +143,7 @@ def active_monitorings(db: Session = Depends(get_db)) -> list[dict]:
                 "max_price": mon.max_price,
                 "geo": mon.geo,
                 "proxy_url": proxy_url,
+                "proxy_pool": active_proxy_urls,
             }
         )
     return payload

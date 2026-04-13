@@ -553,7 +553,7 @@ def format_new_item_message(
     title_line = html.escape(_cleanup_text(title, 160) or "Без названия")
     item_url = html.escape(_build_short_avito_url(url, avito_ad_id))
     return (
-        f"{title_line}\n"
+        f"<b>{title_line}</b>\n"
         f"💰 {price_line}\n"
         f"📍 {location_line}\n"
         f"🔗 {item_url}"
@@ -581,7 +581,7 @@ def format_price_change_message(
     item_url = html.escape(_build_short_avito_url(url, avito_ad_id))
     return (
         "💸 Изменение стоимости\n"
-        f"{title_line}\n"
+        f"<b>{title_line}</b>\n"
         f"⬇️ Было: {old_line}\n"
         f"💰 Стало: {new_line}\n"
         f"📍 {location_line}\n"
