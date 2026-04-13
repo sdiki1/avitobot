@@ -3,6 +3,7 @@ import hashlib
 import hmac
 import json
 import logging
+from typing import Any
 from urllib import request as urllib_request
 
 from sqlalchemy import Select, and_, func, select
@@ -332,15 +333,231 @@ def seconds_to_human(delta_seconds: int) -> str:
     return f"{seconds}с"
 
 
-def format_new_item_message(title: str, price_rub: int | None, url: str, location: str | None) -> str:
-    price_line = f"{price_rub:,} ₽".replace(",", " ") if price_rub is not None else "Цена не указана"
+def _format_price_line(price_rub: int | None) -> str:
+    return f"{price_rub:,} ₽".replace(",", " ") if price_rub is not None else "Цена не указана"
+
+
+def _cleanup_text(value: str | None, max_len: int) -> str | None:
+    if not value:
+        return None
+    normalized = " ".join(str(value).split())
+    normalized = normalized.replace("<", "‹").replace(">", "›")
+    if not normalized:
+        return None
+    if len(normalized) <= max_len:
+        return normalized
+    return f"{normalized[: max_len - 1]}…"
+
+
+def extract_item_description(raw_json: dict[str, Any] | None) -> str | None:
+    if not isinstance(raw_json, dict):
+        return None
+    return _cleanup_text(raw_json.get("description"), 520)
+
+
+def _pick_first_url(value: Any) -> str | None:
+    if isinstance(value, str) and value.startswith(("http://", "https://")):
+        return value
+    if isinstance(value, dict):
+        for nested in value.values():
+            found = _pick_first_url(nested)
+            if found:
+                return found
+    if isinstance(value, list):
+        for nested in value:
+            found = _pick_first_url(nested)
+            if found:
+                return found
+    return None
+
+
+def extract_item_photo_url(raw_json: dict[str, Any] | None) -> str | None:
+    if not isinstance(raw_json, dict):
+        return None
+
+    gallery = raw_json.get("gallery")
+    if isinstance(gallery, dict):
+        for key in ("imageLargeUrl", "imageUrl", "imageVipUrl", "imageLargeVipUrl"):
+            candidate = gallery.get(key)
+            if isinstance(candidate, str) and candidate.startswith(("http://", "https://")):
+                return candidate
+
+    images = raw_json.get("images")
+    found_from_images = _pick_first_url(images)
+    if found_from_images:
+        return found_from_images
+
+    for key in ("phoneImage", "imageUrl"):
+        candidate = raw_json.get(key)
+        if isinstance(candidate, str) and candidate.startswith(("http://", "https://")):
+            return candidate
+    return None
+
+
+def _build_optional_description_block(description: str | None) -> str:
+    cleaned = _cleanup_text(description, 520)
+    if not cleaned:
+        return ""
+    return f"\n\n💬 {cleaned}"
+
+
+def _ru_plural(count: int, one: str, few: str, many: str) -> str:
+    value = abs(count) % 100
+    if 11 <= value <= 14:
+        return many
+    last = value % 10
+    if last == 1:
+        return one
+    if 2 <= last <= 4:
+        return few
+    return many
+
+
+def _try_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if not isinstance(value, str):
+        return None
+    digits = "".join(ch for ch in value if ch.isdigit())
+    if not digits:
+        return None
+    try:
+        return int(digits)
+    except ValueError:
+        return None
+
+
+def _try_float(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip().replace(",", ".")
+    numeric = "".join(ch for ch in cleaned if ch.isdigit() or ch == ".")
+    if not numeric:
+        return None
+    try:
+        return float(numeric)
+    except ValueError:
+        return None
+
+
+def _iter_key_values(data: Any):
+    if isinstance(data, dict):
+        for key, value in data.items():
+            yield str(key), value
+            yield from _iter_key_values(value)
+    elif isinstance(data, list):
+        for item in data:
+            yield from _iter_key_values(item)
+
+
+def _first_by_key(raw_json: dict[str, Any] | None, key_parts: tuple[str, ...], parser) -> Any:
+    if not isinstance(raw_json, dict):
+        return None
+    for key, value in _iter_key_values(raw_json):
+        key_lower = key.lower()
+        if not any(part in key_lower for part in key_parts):
+            continue
+        parsed = parser(value)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _extract_closed_items_line(raw_json: dict[str, Any] | None) -> str | None:
+    if not isinstance(raw_json, dict):
+        return None
+
+    closed_text = _cleanup_text(raw_json.get("closedItemsText"), 80)
+    if closed_text:
+        return closed_text
+
+    completed_count = _first_by_key(raw_json, ("closed", "completed"), _try_int)
+    if completed_count is None:
+        return None
+    noun = _ru_plural(completed_count, "завершённое объявление", "завершённых объявления", "завершённых объявлений")
+    return f"{completed_count} {noun}"
+
+
+def extract_seller_stats_block(raw_json: dict[str, Any] | None) -> str:
+    if not isinstance(raw_json, dict):
+        return ""
+
+    rating = _first_by_key(raw_json, ("rating", "score", "stars"), _try_float)
+    reviews_count = _first_by_key(raw_json, ("review", "feedback"), _try_int)
+    closed_line = _extract_closed_items_line(raw_json)
+
+    lines: list[str] = []
+    if rating is not None:
+        lines.append(f"{rating:.1f} ⭐️")
+    if reviews_count is not None:
+        noun = _ru_plural(reviews_count, "отзыв", "отзыва", "отзывов")
+        lines.append(f"{reviews_count} {noun}")
+    if closed_line:
+        lines.append(closed_line)
+
+    if not lines:
+        return ""
+    return "\n".join(lines)
+
+
+def _build_optional_seller_stats_block(raw_json: dict[str, Any] | None) -> str:
+    block = extract_seller_stats_block(raw_json)
+    if not block:
+        return ""
+    return f"\n\n{block}"
+
+
+def format_new_item_message(
+    title: str,
+    price_rub: int | None,
+    url: str,
+    location: str | None,
+    description: str | None = None,
+    raw_json: dict[str, Any] | None = None,
+) -> str:
+    price_line = _format_price_line(price_rub)
     location_line = location or "Локация не указана"
+    title_line = _cleanup_text(title, 160) or "Без названия"
     return (
-        "🔔 Новое объявление Avito\n"
-        f"{title}\n"
+        f"{title_line}\n"
         f"💰 {price_line}\n"
         f"📍 {location_line}\n"
         f"🔗 {url}"
+        f"{_build_optional_description_block(description)}"
+        f"{_build_optional_seller_stats_block(raw_json)}"
+    )
+
+
+def format_price_change_message(
+    title: str,
+    old_price_rub: int | None,
+    new_price_rub: int | None,
+    url: str,
+    location: str | None,
+    description: str | None = None,
+    raw_json: dict[str, Any] | None = None,
+) -> str:
+    old_line = _format_price_line(old_price_rub)
+    new_line = _format_price_line(new_price_rub)
+    location_line = location or "Локация не указана"
+    title_line = _cleanup_text(title, 160) or "Без названия"
+    return (
+        "💸 Изменение стоимости\n"
+        f"{title_line}\n"
+        f"⬇️ Было: {old_line}\n"
+        f"💰 Стало: {new_line}\n"
+        f"📍 {location_line}\n"
+        f"🔗 {url}"
+        f"{_build_optional_description_block(description)}"
+        f"{_build_optional_seller_stats_block(raw_json)}"
     )
 
 

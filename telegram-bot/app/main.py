@@ -12,8 +12,6 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
 from aiogram import Bot, Dispatcher, F, Router
-from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -154,6 +152,13 @@ def _extract_start_arg(text: str | None) -> str:
 def _looks_like_url(value: str) -> bool:
     lowered = value.lower()
     return lowered.startswith("http://") or lowered.startswith("https://")
+
+
+def _fit_photo_caption(value: str, max_len: int = 1024) -> str:
+    text = (value or "").strip()
+    if len(text) <= max_len:
+        return text
+    return f"{text[: max_len - 1]}…"
 
 
 class BackendAPI:
@@ -565,7 +570,7 @@ class MultiBotManager:
             logger.error(f"Bot #{bot_id} has invalid token, skipping")
             return
 
-        bot = Bot(token=token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+        bot = Bot(token=token)
         try:
             me = await bot.get_me()
             await self.backend.sync_bot_metadata(bot_id=bot_id, telegram_bot_id=me.id, bot_username=me.username)
@@ -667,11 +672,30 @@ async def notifications_loop(manager: MultiBotManager, backend: BackendAPI, stop
                 if not runtime:
                     continue
                 try:
-                    await runtime.bot.send_message(
-                        chat_id=notification["telegram_id"],
-                        text=notification["message"],
-                        disable_web_page_preview=True,
-                    )
+                    text = str(notification.get("message") or "").strip()
+                    photo_url = str(notification.get("photo_url") or "").strip()
+                    if photo_url:
+                        try:
+                            await runtime.bot.send_photo(
+                                chat_id=notification["telegram_id"],
+                                photo=photo_url,
+                                caption=_fit_photo_caption(text),
+                                parse_mode=None,
+                            )
+                        except Exception:
+                            await runtime.bot.send_message(
+                                chat_id=notification["telegram_id"],
+                                text=text,
+                                parse_mode=None,
+                                disable_web_page_preview=True,
+                            )
+                    else:
+                        await runtime.bot.send_message(
+                            chat_id=notification["telegram_id"],
+                            text=text,
+                            parse_mode=None,
+                            disable_web_page_preview=True,
+                        )
                     await backend.mark_notification_sent(notification["id"])
                 except Exception as exc:
                     logger.warning(f"Failed to deliver notification id={notification.get('id')}: {exc}")

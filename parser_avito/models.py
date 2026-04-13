@@ -1,4 +1,4 @@
-from pydantic import BaseModel, HttpUrl, RootModel
+from pydantic import BaseModel, ConfigDict, HttpUrl, RootModel
 from typing import List, Optional, Dict, Any
 
 
@@ -98,6 +98,8 @@ class IvaStep(BaseModel):
 
 
 class Item(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     id: int | dict | None = None
     categoryId: int | dict | None = None
     locationId: int | dict | None = None

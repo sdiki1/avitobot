@@ -13,7 +13,14 @@ from app.schemas import (
     InternalScanPayload,
 )
 from app.services.auth import require_internal_token
-from app.services.helpers import format_new_item_message, get_active_subscription_query, now_utc
+from app.services.helpers import (
+    extract_item_description,
+    extract_item_photo_url,
+    format_new_item_message,
+    format_price_change_message,
+    get_active_subscription_query,
+    now_utc,
+)
 
 router = APIRouter(prefix="/internal", tags=["internal"], dependencies=[Depends(require_internal_token)])
 
@@ -148,6 +155,7 @@ def save_scan_result(monitoring_id: int, payload: InternalScanPayload, db: Sessi
 
     created = 0
     touched = 0
+    price_changes = 0
     for item in payload.items:
         existing = db.scalar(
             select(MonitoringItem).where(
@@ -158,7 +166,37 @@ def save_scan_result(monitoring_id: int, payload: InternalScanPayload, db: Sessi
             )
         )
         if existing:
+            old_price = existing.price_rub
+            new_price = item.price_rub
+            price_changed = old_price != new_price
+
+            existing.title = item.title
+            existing.url = item.url
+            existing.price_rub = item.price_rub
+            existing.location = item.location
+            existing.published_at = item.published_at
+            existing.raw_json = item.raw_json
             existing.last_seen_at = now_utc()
+
+            if price_changed:
+                notification = Notification(
+                    user_id=monitoring.user_id,
+                    monitoring_id=monitoring_id,
+                    item_id=existing.id,
+                    message=format_price_change_message(
+                        title=existing.title,
+                        old_price_rub=old_price,
+                        new_price_rub=new_price,
+                        url=existing.url,
+                        location=existing.location,
+                        description=extract_item_description(existing.raw_json),
+                        raw_json=existing.raw_json,
+                    ),
+                    status="pending",
+                )
+                db.add(notification)
+                price_changes += 1
+
             touched += 1
             continue
 
@@ -184,6 +222,8 @@ def save_scan_result(monitoring_id: int, payload: InternalScanPayload, db: Sessi
                 price_rub=db_item.price_rub,
                 url=db_item.url,
                 location=db_item.location,
+                description=extract_item_description(db_item.raw_json),
+                raw_json=db_item.raw_json,
             ),
             status="pending",
         )
@@ -192,7 +232,7 @@ def save_scan_result(monitoring_id: int, payload: InternalScanPayload, db: Sessi
 
     monitoring.last_checked_at = now_utc()
     db.commit()
-    return {"ok": True, "created_items": created, "updated_items": touched}
+    return {"ok": True, "created_items": created, "updated_items": touched, "price_changes": price_changes}
 
 
 @router.get("/bot-monitoring/current", response_model=InternalBotLookupResponse)
@@ -258,6 +298,7 @@ def pending_notifications(
     for n in notifications:
         user = db.get(User, n.user_id)
         monitoring = db.get(Monitoring, n.monitoring_id)
+        item = db.get(MonitoringItem, n.item_id)
         if not user:
             continue
         if not monitoring or monitoring.bot_id is None:
@@ -271,6 +312,7 @@ def pending_notifications(
                 telegram_bot_id=bot.telegram_bot_id if bot else None,
                 monitoring_id=n.monitoring_id,
                 message=n.message,
+                photo_url=extract_item_photo_url(item.raw_json if item else None),
             )
         )
     return out

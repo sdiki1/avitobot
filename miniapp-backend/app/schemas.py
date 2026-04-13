@@ -286,6 +286,7 @@ class InternalNotificationResponse(BaseModel):
     telegram_bot_id: int | None = None
     monitoring_id: int
     message: str
+    photo_url: str | None = None
 
 
 class InternalBotConfigResponse(BaseModel):
