@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     miniapp_auth_cookie_samesite: str = "lax"
     miniapp_access_cookie_name: str = "miniapp_access_token"
     miniapp_refresh_cookie_name: str = "miniapp_refresh_token"
+    proxy_block_cooldown_minutes: int = 30
 
 
 settings = Settings()

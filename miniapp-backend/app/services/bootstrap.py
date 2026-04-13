@@ -66,6 +66,10 @@ def init_db() -> None:
         conn.exec_driver_sql("ALTER TABLE user_subscriptions ADD COLUMN IF NOT EXISTS is_trial BOOLEAN DEFAULT FALSE")
         conn.exec_driver_sql("UPDATE user_subscriptions SET is_trial = FALSE WHERE is_trial IS NULL")
 
+        conn.exec_driver_sql("ALTER TABLE proxies ADD COLUMN IF NOT EXISTS cooldown_until TIMESTAMP WITH TIME ZONE")
+        conn.exec_driver_sql("ALTER TABLE proxies ADD COLUMN IF NOT EXISTS last_blocked_at TIMESTAMP WITH TIME ZONE")
+        conn.exec_driver_sql("ALTER TABLE proxies ADD COLUMN IF NOT EXISTS last_block_status INTEGER")
+
 
 def seed_default_plans(db: Session) -> None:
     for plan in DEFAULT_PLANS:

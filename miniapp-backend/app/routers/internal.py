@@ -1,7 +1,10 @@
+from datetime import timedelta
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import and_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.database import get_db
 from app.models import Monitoring, MonitoringItem, Notification, ProxyConfig, TelegramBot, User, UserSubscription
 from app.schemas import (
@@ -10,6 +13,7 @@ from app.schemas import (
     InternalBotLookupResponse,
     InternalBotSyncRequest,
     InternalNotificationResponse,
+    InternalProxyBlockedRequest,
     InternalScanPayload,
 )
 from app.services.auth import require_internal_token
@@ -20,6 +24,7 @@ from app.services.helpers import (
     format_price_change_message,
     get_active_subscription_query,
     normalize_monitoring_url,
+    normalize_proxy_url,
     now_utc,
 )
 
@@ -97,6 +102,36 @@ def sync_bot(bot_id: int, payload: InternalBotSyncRequest, db: Session = Depends
     return {"ok": True}
 
 
+@router.post("/proxies/blocked")
+def mark_proxy_blocked(payload: InternalProxyBlockedRequest, db: Session = Depends(get_db)) -> dict:
+    raw_proxy = (payload.proxy_url or "").strip()
+    if not raw_proxy:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="proxy_url is required")
+
+    normalized_proxy = normalize_proxy_url(raw_proxy)
+    proxy = db.scalar(select(ProxyConfig).where(ProxyConfig.proxy_url == raw_proxy))
+    if not proxy and normalized_proxy != raw_proxy:
+        proxy = db.scalar(select(ProxyConfig).where(ProxyConfig.proxy_url == normalized_proxy))
+    if not proxy:
+        all_proxies = db.scalars(select(ProxyConfig)).all()
+        for candidate in all_proxies:
+            if normalize_proxy_url(candidate.proxy_url) == normalized_proxy:
+                proxy = candidate
+                break
+
+    if not proxy:
+        return {"ok": False, "updated": False, "reason": "proxy not found"}
+
+    now = now_utc()
+    cooldown_minutes = max(1, int(settings.proxy_block_cooldown_minutes))
+    proxy.cooldown_until = now + timedelta(minutes=cooldown_minutes)
+    proxy.last_blocked_at = now
+    proxy.last_block_status = payload.status_code
+    proxy.fail_count = int(proxy.fail_count or 0) + 1
+    db.commit()
+    return {"ok": True, "updated": True, "proxy_id": proxy.id, "cooldown_until": proxy.cooldown_until}
+
+
 @router.get("/monitorings/active")
 def active_monitorings(db: Session = Depends(get_db)) -> list[dict]:
     monitorings = db.scalars(
@@ -109,7 +144,17 @@ def active_monitorings(db: Session = Depends(get_db)) -> list[dict]:
         )
         .order_by(Monitoring.id.asc())
     ).all()
-    proxies = db.scalars(select(ProxyConfig).where(ProxyConfig.is_active.is_(True)).order_by(ProxyConfig.id.asc())).all()
+    now = now_utc()
+    proxies = db.scalars(
+        select(ProxyConfig)
+        .where(
+            and_(
+                ProxyConfig.is_active.is_(True),
+                or_(ProxyConfig.cooldown_until.is_(None), ProxyConfig.cooldown_until <= now),
+            )
+        )
+        .order_by(ProxyConfig.id.asc())
+    ).all()
 
     payload = []
     active_proxy_urls = [proxy.proxy_url for proxy in proxies if proxy.proxy_url]

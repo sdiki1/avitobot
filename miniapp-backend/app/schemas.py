@@ -161,6 +161,9 @@ class ProxyResponse(BaseModel):
     change_ip_url: str | None = None
     is_active: bool
     fail_count: int
+    cooldown_until: datetime | None = None
+    last_blocked_at: datetime | None = None
+    last_block_status: int | None = None
 
     class Config:
         from_attributes = True
@@ -319,3 +322,9 @@ class InternalBotCommandRequest(BaseModel):
     telegram_id: int
     bot_id: int
     url: str | None = None
+
+
+class InternalProxyBlockedRequest(BaseModel):
+    proxy_url: str
+    status_code: int
+    source_url: str | None = None

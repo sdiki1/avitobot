@@ -3,7 +3,7 @@ from __future__ import annotations
 import html as html_lib
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlsplit, urlunsplit
@@ -22,9 +22,13 @@ from common_data import HEADERS  # type: ignore  # noqa: E402
 from dto import AvitoConfig  # type: ignore  # noqa: E402
 from filters.ads_filter import AdsFilter  # type: ignore  # noqa: E402
 from models import ItemsResponse, Item  # type: ignore  # noqa: E402
+from app.config import BACKEND_URL, INTERNAL_API_TOKEN, PROXY_BLOCK_COOLDOWN_MINUTES, REQUEST_TIMEOUT_SEC
 
 
 class AvitoAdapter:
+    def __init__(self) -> None:
+        self._proxy_cooldown_until: dict[str, datetime] = {}
+
     @staticmethod
     def _normalize_proxy_url(proxy_url: str) -> str:
         raw = proxy_url.strip()
@@ -99,6 +103,45 @@ class AvitoAdapter:
             return None
         return datetime.fromtimestamp(ms_timestamp / 1000, tz=timezone.utc)
 
+    @staticmethod
+    def _backend_headers() -> dict[str, str]:
+        return {
+            "X-Internal-Token": INTERNAL_API_TOKEN,
+            "Content-Type": "application/json",
+        }
+
+    def _is_proxy_cooling_down(self, proxy_url: str) -> bool:
+        until = self._proxy_cooldown_until.get(proxy_url)
+        if not until:
+            return False
+        now = datetime.now(timezone.utc)
+        if now >= until:
+            self._proxy_cooldown_until.pop(proxy_url, None)
+            return False
+        return True
+
+    def _set_local_proxy_cooldown(self, proxy_url: str) -> None:
+        cooldown_minutes = max(1, int(PROXY_BLOCK_COOLDOWN_MINUTES))
+        self._proxy_cooldown_until[proxy_url] = datetime.now(timezone.utc) + timedelta(minutes=cooldown_minutes)
+
+    def _report_blocked_proxy(self, proxy_url: str, status_code: int, source_url: str) -> None:
+        payload = {
+            "proxy_url": proxy_url,
+            "status_code": status_code,
+            "source_url": source_url,
+        }
+        endpoint = f"{BACKEND_URL}/api/v1/internal/proxies/blocked"
+        try:
+            response = requests.post(
+                endpoint,
+                headers=self._backend_headers(),
+                json=payload,
+                timeout=max(3, min(REQUEST_TIMEOUT_SEC, 10)),
+            )
+            response.raise_for_status()
+        except Exception as exc:
+            logger.warning(f"Failed to report blocked proxy={proxy_url}: {exc}")
+
     def _proxy_candidates(self, monitoring: dict[str, Any]) -> list[str]:
         raw_pool = monitoring.get("proxy_pool")
         candidates: list[str] = []
@@ -108,13 +151,17 @@ class AvitoAdapter:
                 if not isinstance(raw, str):
                     continue
                 normalized = self._normalize_proxy_url(raw)
-                if normalized and normalized not in candidates:
+                if normalized and normalized not in candidates and not self._is_proxy_cooling_down(normalized):
                     candidates.append(normalized)
 
         raw_single = monitoring.get("proxy_url")
         if isinstance(raw_single, str):
             normalized_single = self._normalize_proxy_url(raw_single)
-            if normalized_single and normalized_single not in candidates:
+            if (
+                normalized_single
+                and normalized_single not in candidates
+                and not self._is_proxy_cooling_down(normalized_single)
+            ):
                 candidates.insert(0, normalized_single)
 
         return candidates
@@ -136,6 +183,8 @@ class AvitoAdapter:
                 status_code = exc.response.status_code if exc.response is not None else None
                 last_exc = exc
                 if status_code in {403, 429}:
+                    self._set_local_proxy_cooldown(proxy)
+                    self._report_blocked_proxy(proxy, status_code, url)
                     logger.warning(
                         f"Proxy {proxy_label} blocked for url={url}: status={status_code}. Switching to next proxy."
                     )

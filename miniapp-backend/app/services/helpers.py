@@ -7,7 +7,7 @@ import logging
 import re
 from typing import Any
 from urllib import request as urllib_request
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import quote, urlsplit, urlunsplit
 
 from sqlalchemy import Select, and_, func, select
 from sqlalchemy.orm import Session
@@ -60,6 +60,31 @@ def normalize_monitoring_url(url: str | None) -> str:
         return raw
 
     return urlunsplit((parsed.scheme, replaced_netloc, parsed.path, parsed.query, parsed.fragment))
+
+
+def normalize_proxy_url(proxy_url: str | None) -> str:
+    raw = (proxy_url or "").strip()
+    if not raw:
+        return ""
+
+    if "://" in raw:
+        return raw
+
+    parts = raw.split(":")
+    if len(parts) >= 4 and parts[1].isdigit():
+        host = parts[0]
+        port = parts[1]
+        username = parts[2]
+        password = ":".join(parts[3:])
+        return f"http://{quote(username, safe='')}:{quote(password, safe='')}@{host}:{port}"
+
+    if len(parts) == 2 and parts[1].isdigit():
+        return f"http://{raw}"
+
+    if "@" in raw:
+        return f"http://{raw}"
+
+    return raw
 
 
 def build_miniapp_auth_token(telegram_id: int) -> str:
