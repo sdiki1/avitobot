@@ -14,8 +14,6 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
     BotCommand,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
     KeyboardButton,
     Message,
     ReplyKeyboardMarkup,
@@ -54,11 +52,14 @@ def build_miniapp_url(telegram_id: int) -> str:
     return MINIAPP_PUBLIC_URL
 
 
-def miniapp_keyboard(telegram_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="Открыть MiniApp", web_app=WebAppInfo(url=build_miniapp_url(telegram_id)))],
-        ]
+def miniapp_keyboard(telegram_id: int) -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=BTN_OPEN_MINIAPP, web_app=WebAppInfo(url=build_miniapp_url(telegram_id)))],
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+        input_field_placeholder="Открыть MiniApp",
     )
 
 

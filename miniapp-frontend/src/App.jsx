@@ -70,6 +70,15 @@ function getTelegramInitData() {
   if (!webapp) return null
   webapp.ready()
   webapp.expand?.()
+  webapp.disableVerticalSwipes?.()
+  try {
+    const maybePromise = webapp.requestFullscreen?.()
+    if (maybePromise && typeof maybePromise.catch === 'function') {
+      maybePromise.catch(() => {})
+    }
+  } catch {
+    // ignore: not supported in some Telegram clients
+  }
   if (!webapp.initData || typeof webapp.initData !== 'string') return null
   return webapp.initData
 }
