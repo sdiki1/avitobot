@@ -18,10 +18,55 @@ const DEFAULT_MINIAPP_CONTENT = {
   subscriptions_hint: 'Управление тарифом и переход к назначенным ботам.',
   profile_title: 'Профиль',
 };
+const MINIAPP_PLAN_DEFINITIONS = [
+  {
+    key: 'standard',
+    name: 'Стандартная',
+    defaults: {
+      description: 'Стандартная подписка',
+      links_limit: 1,
+      duration_days: 30,
+      price_rub: 500,
+      is_active: true,
+    },
+  },
+  {
+    key: 'speed',
+    name: 'Скоростная',
+    defaults: {
+      description: 'Скоростная подписка',
+      links_limit: 1,
+      duration_days: 30,
+      price_rub: 900,
+      is_active: true,
+    },
+  },
+];
 
 function toInt(value) {
   const parsed = Number(value);
   return Number.isNaN(parsed) ? null : parsed;
+}
+
+function normalizePlanName(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function composeMiniappPlans(plans) {
+  const allPlans = Array.isArray(plans) ? plans : [];
+  return MINIAPP_PLAN_DEFINITIONS.map((preset) => {
+    const existing = allPlans.find((plan) => normalizePlanName(plan?.name) === normalizePlanName(preset.name));
+    return {
+      key: preset.key,
+      id: existing?.id || null,
+      name: preset.name,
+      description: existing?.description ?? preset.defaults.description,
+      links_limit: existing?.links_limit ?? preset.defaults.links_limit,
+      duration_days: existing?.duration_days ?? preset.defaults.duration_days,
+      price_rub: existing?.price_rub ?? preset.defaults.price_rub,
+      is_active: existing?.is_active ?? preset.defaults.is_active,
+    };
+  });
 }
 
 function withAdminBase(path) {
@@ -65,52 +110,70 @@ router.get('/', async (req, res) => {
 
 router.get('/plans', async (req, res) => {
   try {
-    const plans = await api.getPlans();
-    res.render('plans', { plans, error: null, success: req.query.success || null });
+    const allPlans = await api.getPlans();
+    const miniappPlans = composeMiniappPlans(allPlans);
+    const visibleIds = new Set(miniappPlans.map((plan) => Number(plan.id)).filter(Boolean));
+    const hiddenPlansCount = allPlans.filter((plan) => !visibleIds.has(Number(plan.id))).length;
+    res.render('plans', {
+      plans: miniappPlans,
+      hiddenPlansCount,
+      error: req.query.error || null,
+      success: req.query.success || null,
+    });
   } catch (error) {
-    res.render('plans', { plans: [], error: error.message, success: null });
+    res.render('plans', { plans: composeMiniappPlans([]), hiddenPlansCount: 0, error: error.message, success: null });
   }
 });
 
 router.post('/plans', async (req, res) => {
-  try {
-    await api.createPlan({
-      name: req.body.name,
-      description: req.body.description || null,
-      links_limit: toInt(req.body.links_limit),
-      duration_days: toInt(req.body.duration_days),
-      price_rub: toInt(req.body.price_rub),
-      is_active: req.body.is_active === 'on',
-    });
-    res.redirect(withAdminBase('/plans?success=Тариф+добавлен'));
-  } catch (error) {
-    res.redirect(withAdminBase(`/plans?success=${encodeURIComponent(`Ошибка: ${error.message}`)}`));
-  }
+  res.redirect(withAdminBase('/plans?error=Создание+произвольных+тарифов+отключено'));
 });
 
 router.post('/plans/:id/update', async (req, res) => {
+  res.redirect(withAdminBase('/plans?error=Редактирование+доступно+только+для+тарифов+miniapp'));
+});
+
+router.post('/plans/miniapp/:key/save', async (req, res) => {
   try {
-    await api.updatePlan(req.params.id, {
-      name: req.body.name,
-      description: req.body.description || null,
-      links_limit: toInt(req.body.links_limit),
-      duration_days: toInt(req.body.duration_days),
-      price_rub: toInt(req.body.price_rub),
+    const preset = MINIAPP_PLAN_DEFINITIONS.find((item) => item.key === req.params.key);
+    if (!preset) {
+      throw new Error('Неизвестный тип тарифа');
+    }
+
+    const payload = {
+      name: preset.name,
+      description: req.body.description || preset.defaults.description,
+      links_limit: toInt(req.body.links_limit) ?? preset.defaults.links_limit,
+      duration_days: toInt(req.body.duration_days) ?? preset.defaults.duration_days,
+      price_rub: toInt(req.body.price_rub) ?? preset.defaults.price_rub,
       is_active: req.body.is_active === 'on',
-    });
+    };
+
+    const allPlans = await api.getPlans();
+    const requestedId = toInt(req.body.plan_id);
+    let existingPlan = null;
+    if (requestedId !== null) {
+      existingPlan = allPlans.find((plan) => Number(plan.id) === requestedId) || null;
+    }
+    if (!existingPlan) {
+      existingPlan =
+        allPlans.find((plan) => normalizePlanName(plan?.name) === normalizePlanName(preset.name)) || null;
+    }
+
+    if (existingPlan) {
+      await api.updatePlan(existingPlan.id, payload);
+    } else {
+      await api.createPlan(payload);
+    }
+
     res.redirect(withAdminBase('/plans?success=Тариф+обновлен'));
   } catch (error) {
-    res.redirect(withAdminBase(`/plans?success=${encodeURIComponent(`Ошибка: ${error.message}`)}`));
+    res.redirect(withAdminBase(`/plans?error=${encodeURIComponent(`Ошибка: ${error.message}`)}`));
   }
 });
 
 router.post('/plans/:id/delete', async (req, res) => {
-  try {
-    await api.deletePlan(req.params.id);
-    res.redirect(withAdminBase('/plans?success=Тариф+удален'));
-  } catch (error) {
-    res.redirect(withAdminBase(`/plans?success=${encodeURIComponent(`Ошибка: ${error.message}`)}`));
-  }
+  res.redirect(withAdminBase('/plans?error=Удаление+тарифов+в+этом+разделе+отключено'));
 });
 
 router.get('/proxies', async (req, res) => {

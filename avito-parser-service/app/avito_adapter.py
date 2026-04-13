@@ -6,7 +6,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit, urlunsplit
 
 from bs4 import BeautifulSoup
 from loguru import logger
@@ -52,6 +52,28 @@ class AvitoAdapter:
             return f"http://{raw}"
 
         return raw
+
+    @staticmethod
+    def _normalize_avito_url(url: str) -> str:
+        raw = url.strip()
+        if not raw:
+            return raw
+
+        try:
+            parsed = urlsplit(raw)
+        except Exception:
+            return raw
+
+        netloc = parsed.netloc or ""
+        lower_netloc = netloc.lower()
+        if lower_netloc == "m.avito.ru":
+            replaced_netloc = "www.avito.ru"
+        elif lower_netloc.startswith("m.avito.ru:"):
+            replaced_netloc = "www.avito.ru" + netloc[len("m.avito.ru") :]
+        else:
+            return raw
+
+        return urlunsplit((parsed.scheme, replaced_netloc, parsed.path, parsed.query, parsed.fragment))
 
     @staticmethod
     def find_json_on_page(html_code: str) -> dict[str, Any]:
@@ -140,7 +162,7 @@ class AvitoAdapter:
         raise RuntimeError(f"All proxies exhausted for url={url}")
 
     def parse_monitoring(self, monitoring: dict[str, Any]) -> list[dict[str, Any]]:
-        url = monitoring["url"]
+        url = self._normalize_avito_url(monitoring["url"])
         response = self._request_with_failover(url, monitoring)
 
         data = self.find_json_on_page(response.text)
@@ -161,6 +183,8 @@ class AvitoAdapter:
             min_price=monitoring.get("min_price") if monitoring.get("min_price") is not None else 0,
             max_price=monitoring.get("max_price") if monitoring.get("max_price") is not None else 999_999_999,
             geo=monitoring.get("geo") or None,
+            # Disable max-age filtering so we can detect price changes on old listings.
+            max_age=0,
             ignore_reserv=True,
             ignore_promotion=False,
         )

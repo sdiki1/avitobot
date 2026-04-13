@@ -19,6 +19,7 @@ from app.services.helpers import (
     format_new_item_message,
     format_price_change_message,
     get_active_subscription_query,
+    normalize_monitoring_url,
     now_utc,
 )
 
@@ -29,7 +30,7 @@ def _to_bot_lookup_schema(monitoring: Monitoring) -> InternalBotLookupResponse:
     return InternalBotLookupResponse(
         monitoring_id=monitoring.id,
         title=monitoring.title,
-        url=monitoring.url,
+        url=normalize_monitoring_url(monitoring.url),
         is_active=monitoring.is_active,
         link_configured=monitoring.link_configured,
     )
@@ -135,7 +136,7 @@ def active_monitorings(db: Session = Depends(get_db)) -> list[dict]:
             {
                 "monitoring_id": mon.id,
                 "telegram_id": user.telegram_id,
-                "url": mon.url,
+                "url": normalize_monitoring_url(mon.url),
                 "title": mon.title,
                 "keywords_white": [x for x in (mon.keywords_white or "").split(",") if x],
                 "keywords_black": [x for x in (mon.keywords_black or "").split(",") if x],
@@ -278,7 +279,7 @@ def bot_stop_monitoring(payload: InternalBotCommandRequest, db: Session = Depend
 @router.post("/bot-monitoring/change-link", response_model=InternalBotLookupResponse)
 def bot_change_link(payload: InternalBotCommandRequest, db: Session = Depends(get_db)) -> InternalBotLookupResponse:
     monitoring = _resolve_user_monitoring(db, telegram_id=payload.telegram_id, bot_id=payload.bot_id)
-    cleaned_url = (payload.url or "").strip()
+    cleaned_url = normalize_monitoring_url(payload.url)
     if not cleaned_url:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="URL обязателен")
     monitoring.url = cleaned_url

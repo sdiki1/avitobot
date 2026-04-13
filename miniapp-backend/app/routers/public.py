@@ -31,6 +31,7 @@ from app.services.helpers import (
     get_available_bot_for_user,
     get_or_create_user,
     get_trial_days,
+    normalize_monitoring_url,
     parse_miniapp_auth_token,
     send_subscription_assigned_bot_message,
 )
@@ -67,7 +68,7 @@ def _to_bot_ref(bot: TelegramBot | None) -> BotReference | None:
 def _monitoring_to_schema(mon: Monitoring) -> MonitoringResponse:
     return MonitoringResponse(
         id=mon.id,
-        url=mon.url,
+        url=normalize_monitoring_url(mon.url),
         title=mon.title,
         keywords_white=[x for x in (mon.keywords_white or "").split(",") if x],
         keywords_black=[x for x in (mon.keywords_black or "").split(",") if x],
@@ -371,10 +372,12 @@ def create_monitoring(
     if not payload.url or not payload.url.strip():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="URL обязателен")
 
+    normalized_url = normalize_monitoring_url(payload.url)
+
     monitoring = Monitoring(
         user_id=user.id,
         bot_id=bot.id,
-        url=payload.url.strip(),
+        url=normalized_url,
         title=payload.title,
         keywords_white=",".join(payload.keywords_white),
         keywords_black=",".join(payload.keywords_black),
@@ -409,7 +412,7 @@ def purchase_monitoring(
             detail="Нет доступного бота для нового мониторинга. Добавьте ботов в админке.",
         )
 
-    cleaned_url = (payload.url or "").strip()
+    cleaned_url = normalize_monitoring_url(payload.url)
     link_configured = bool(cleaned_url)
     monitoring = Monitoring(
         user_id=user.id,

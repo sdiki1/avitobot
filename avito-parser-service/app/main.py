@@ -54,7 +54,13 @@ def main() -> None:
                 items = adapter.parse_monitoring(mon)
                 result = push_scan_result(mon_id, items)
                 logger.info(
-                    f"monitoring={mon_id} url={mon_url} parsed={len(items)} created={result.get('created_items', 0)}"
+                    "monitoring={} url={} parsed={} created={} updated={} price_changes={}",
+                    mon_id,
+                    mon_url,
+                    len(items),
+                    result.get("created_items", 0),
+                    result.get("updated_items", 0),
+                    result.get("price_changes", 0),
                 )
             except Exception as exc:
                 logger.warning(f"monitoring={mon_id} url={mon_url} failed: {exc}")

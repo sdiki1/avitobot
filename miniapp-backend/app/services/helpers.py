@@ -7,7 +7,7 @@ import logging
 import re
 from typing import Any
 from urllib import request as urllib_request
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 from sqlalchemy import Select, and_, func, select
 from sqlalchemy.orm import Session
@@ -38,6 +38,28 @@ MINIAPP_CONTENT_DEFAULTS = {
 
 def now_utc() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def normalize_monitoring_url(url: str | None) -> str:
+    raw = (url or "").strip()
+    if not raw:
+        return ""
+
+    try:
+        parsed = urlsplit(raw)
+    except Exception:
+        return raw
+
+    netloc = parsed.netloc or ""
+    lower_netloc = netloc.lower()
+    if lower_netloc == "m.avito.ru":
+        replaced_netloc = "www.avito.ru"
+    elif lower_netloc.startswith("m.avito.ru:"):
+        replaced_netloc = "www.avito.ru" + netloc[len("m.avito.ru") :]
+    else:
+        return raw
+
+    return urlunsplit((parsed.scheme, replaced_netloc, parsed.path, parsed.query, parsed.fragment))
 
 
 def build_miniapp_auth_token(telegram_id: int) -> str:
