@@ -2,13 +2,10 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime
-import hashlib
-import hmac
 import os
 from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
 from aiogram import Bot, Dispatcher, F, Router
@@ -28,10 +25,9 @@ from aiogram.utils.token import TokenValidationError, validate_token
 from loguru import logger
 
 
-BACKEND_URL = os.getenv("BACKEND_URL", "http://miniapp-backend:8000").rstrip("/")
+BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8001").rstrip("/")
 INTERNAL_API_TOKEN = os.getenv("INTERNAL_API_TOKEN", "change_me_internal_token")
 MINIAPP_PUBLIC_URL = os.getenv("MINIAPP_PUBLIC_URL", "http://localhost")
-MINIAPP_AUTH_SECRET = os.getenv("MINIAPP_AUTH_SECRET", "change_me_miniapp_auth_secret")
 BOTS_REFRESH_SEC = int(os.getenv("BOTS_REFRESH_SEC", "15"))
 NOTIFY_POLL_SEC = int(os.getenv("NOTIFY_POLL_SEC", "4"))
 
@@ -53,21 +49,9 @@ def has_valid_bot_token(token: str) -> bool:
     return True
 
 
-def build_miniapp_auth_token(telegram_id: int) -> str:
-    telegram_raw = str(telegram_id)
-    signature = hmac.new(
-        MINIAPP_AUTH_SECRET.encode("utf-8"),
-        telegram_raw.encode("utf-8"),
-        hashlib.sha256,
-    ).hexdigest()[:24]
-    return f"{telegram_raw}.{signature}"
-
-
 def build_miniapp_url(telegram_id: int) -> str:
-    parsed = urlsplit(MINIAPP_PUBLIC_URL)
-    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
-    query["auth"] = build_miniapp_auth_token(telegram_id)
-    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(query), parsed.fragment))
+    _ = telegram_id
+    return MINIAPP_PUBLIC_URL
 
 
 def miniapp_keyboard(telegram_id: int) -> InlineKeyboardMarkup:

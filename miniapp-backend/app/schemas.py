@@ -9,6 +9,10 @@ class TelegramAuthRequest(BaseModel):
     full_name: str | None = None
 
 
+class MiniAppSignInRequest(BaseModel):
+    init_data: str = Field(min_length=1)
+
+
 class UserResponse(BaseModel):
     id: int
     telegram_id: int

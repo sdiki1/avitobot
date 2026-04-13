@@ -1,4 +1,4 @@
-const BACKEND_URL = (process.env.BACKEND_URL || 'http://miniapp-backend:8000').replace(/\/$/, '');
+const BACKEND_URL = (process.env.BACKEND_URL || 'http://localhost:8001').replace(/\/$/, '');
 const ADMIN_API_TOKEN = process.env.ADMIN_API_TOKEN || 'change_me_admin_token';
 
 async function request(path, options = {}) {

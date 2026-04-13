@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import and_, desc, func, select
 from sqlalchemy.orm import Session
 
@@ -7,6 +7,7 @@ from app.models import Monitoring, MonitoringItem, Notification, Payment, Tariff
 from app.schemas import (
     BotReference,
     MiniAppContentResponse,
+    MiniAppSignInRequest,
     MonitoringCreate,
     MonitoringItemResponse,
     MonitoringPurchaseRequest,
@@ -32,6 +33,14 @@ from app.services.helpers import (
     get_trial_days,
     parse_miniapp_auth_token,
     send_subscription_assigned_bot_message,
+)
+from app.services.miniapp_auth import (
+    assert_telegram_id_match,
+    clear_miniapp_session,
+    get_active_bot_tokens,
+    issue_miniapp_session,
+    parse_and_validate_init_data,
+    require_miniapp_user,
 )
 
 router = APIRouter(prefix="/public", tags=["public"])
@@ -95,13 +104,6 @@ def _miniapp_content_response(values: dict[str, str]) -> MiniAppContentResponse:
             {"key": "privacy", "title": values["miniapp_info_privacy_title"], "url": values["miniapp_info_privacy_url"]},
         ],
     )
-
-
-def _require_user(db: Session, telegram_id: int) -> User:
-    user = db.scalar(select(User).where(User.telegram_id == telegram_id))
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    return user
 
 
 def _require_active_subscription(db: Session, user_id: int) -> UserSubscription:
@@ -203,13 +205,53 @@ def telegram_auth(payload: TelegramAuthRequest, db: Session = Depends(get_db)) -
     return user
 
 
+@router.post("/auth/miniapp/signin", response_model=TelegramAuthResolveResponse)
+def miniapp_signin(
+    payload: MiniAppSignInRequest,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> TelegramAuthResolveResponse:
+    identity = parse_and_validate_init_data(payload.init_data, get_active_bot_tokens(db))
+    user = get_or_create_user(
+        db,
+        telegram_id=identity.telegram_id,
+        username=identity.username,
+        full_name=identity.full_name,
+    )
+    user = ensure_user_referral_code(db, user)
+    issue_miniapp_session(response, user.telegram_id)
+    return TelegramAuthResolveResponse(
+        telegram_id=user.telegram_id,
+        user=UserResponse.model_validate(user),
+    )
+
+
+@router.get("/auth/session", response_model=TelegramAuthResolveResponse)
+def miniapp_session(auth_user: User = Depends(require_miniapp_user)) -> TelegramAuthResolveResponse:
+    return TelegramAuthResolveResponse(
+        telegram_id=auth_user.telegram_id,
+        user=UserResponse.model_validate(auth_user),
+    )
+
+
+@router.post("/auth/logout")
+def miniapp_logout(response: Response) -> dict[str, bool]:
+    clear_miniapp_session(response)
+    return {"ok": True}
+
+
 @router.get("/auth/resolve", response_model=TelegramAuthResolveResponse)
-def resolve_auth(auth: str = Query(...), db: Session = Depends(get_db)) -> TelegramAuthResolveResponse:
+def resolve_auth(
+    response: Response,
+    auth: str = Query(...),
+    db: Session = Depends(get_db),
+) -> TelegramAuthResolveResponse:
     telegram_id = parse_miniapp_auth_token(auth)
     if telegram_id is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid auth token")
     user = get_or_create_user(db, telegram_id=telegram_id, username=None, full_name=None)
     user = ensure_user_referral_code(db, user)
+    issue_miniapp_session(response, user.telegram_id)
     return TelegramAuthResolveResponse(
         telegram_id=telegram_id,
         user=UserResponse.model_validate(user),
@@ -217,9 +259,13 @@ def resolve_auth(auth: str = Query(...), db: Session = Depends(get_db)) -> Teleg
 
 
 @router.post("/onboarding-trial", response_model=OnboardingTrialResponse)
-def onboarding_trial(payload: OnboardingTrialRequest, db: Session = Depends(get_db)) -> OnboardingTrialResponse:
-    user = get_or_create_user(db, payload.telegram_id, username=None, full_name=None)
-    user = ensure_user_referral_code(db, user)
+def onboarding_trial(
+    payload: OnboardingTrialRequest,
+    auth_user: User = Depends(require_miniapp_user),
+    db: Session = Depends(get_db),
+) -> OnboardingTrialResponse:
+    assert_telegram_id_match(auth_user, payload.telegram_id)
+    user = ensure_user_referral_code(db, auth_user)
     subscription = _activate_onboarding_trial(db, user)
     if not subscription:
         return OnboardingTrialResponse(granted=False, days=ONBOARDING_TRIAL_DAYS, ends_at=None)
@@ -238,9 +284,13 @@ def miniapp_content(db: Session = Depends(get_db)) -> MiniAppContentResponse:
 
 
 @router.get("/profile")
-def profile(telegram_id: int = Query(...), db: Session = Depends(get_db)) -> dict:
-    user = _require_user(db, telegram_id)
-    user = ensure_user_referral_code(db, user)
+def profile(
+    telegram_id: int = Query(...),
+    auth_user: User = Depends(require_miniapp_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    assert_telegram_id_match(auth_user, telegram_id)
+    user = ensure_user_referral_code(db, auth_user)
     subscription = db.scalar(get_active_subscription_query(user.id))
     monitorings_total = db.scalar(select(func.count(Monitoring.id)).where(Monitoring.user_id == user.id))
     active_monitorings = db.scalar(
@@ -290,15 +340,25 @@ def profile(telegram_id: int = Query(...), db: Session = Depends(get_db)) -> dic
 
 
 @router.get("/monitorings", response_model=list[MonitoringResponse])
-def list_monitorings(telegram_id: int = Query(...), db: Session = Depends(get_db)) -> list[MonitoringResponse]:
-    user = _require_user(db, telegram_id)
+def list_monitorings(
+    telegram_id: int = Query(...),
+    auth_user: User = Depends(require_miniapp_user),
+    db: Session = Depends(get_db),
+) -> list[MonitoringResponse]:
+    assert_telegram_id_match(auth_user, telegram_id)
+    user = auth_user
     monitorings = db.scalars(select(Monitoring).where(Monitoring.user_id == user.id).order_by(Monitoring.id.desc())).all()
     return [_monitoring_to_schema(m) for m in monitorings]
 
 
 @router.post("/monitorings", response_model=MonitoringResponse)
-def create_monitoring(payload: MonitoringCreate, db: Session = Depends(get_db)) -> MonitoringResponse:
-    user = _require_user(db, payload.telegram_id)
+def create_monitoring(
+    payload: MonitoringCreate,
+    auth_user: User = Depends(require_miniapp_user),
+    db: Session = Depends(get_db),
+) -> MonitoringResponse:
+    assert_telegram_id_match(auth_user, payload.telegram_id)
+    user = auth_user
     active_sub = _require_active_subscription(db, user.id)
     links_limit = active_sub.plan.links_limit if active_sub.plan else 0
     _require_slot_available(db, user.id, links_limit)
@@ -331,8 +391,13 @@ def create_monitoring(payload: MonitoringCreate, db: Session = Depends(get_db)) 
 
 
 @router.post("/monitorings/purchase", response_model=MonitoringResponse)
-def purchase_monitoring(payload: MonitoringPurchaseRequest, db: Session = Depends(get_db)) -> MonitoringResponse:
-    user = _require_user(db, payload.telegram_id)
+def purchase_monitoring(
+    payload: MonitoringPurchaseRequest,
+    auth_user: User = Depends(require_miniapp_user),
+    db: Session = Depends(get_db),
+) -> MonitoringResponse:
+    assert_telegram_id_match(auth_user, payload.telegram_id)
+    user = auth_user
     active_sub = _require_active_subscription(db, user.id)
     links_limit = active_sub.plan.links_limit if active_sub.plan else 0
     total_before = _require_slot_available(db, user.id, links_limit)
@@ -368,9 +433,11 @@ def purchase_monitoring(payload: MonitoringPurchaseRequest, db: Session = Depend
 @router.post("/subscriptions/purchase", response_model=PurchaseSubscriptionResponse)
 def purchase_subscription(
     payload: PurchaseSubscriptionRequest,
+    auth_user: User = Depends(require_miniapp_user),
     db: Session = Depends(get_db),
 ) -> PurchaseSubscriptionResponse:
-    user = get_or_create_user(db, payload.telegram_id, username=None, full_name=None)
+    assert_telegram_id_match(auth_user, payload.telegram_id)
+    user = auth_user
     plan = db.get(TariffPlan, payload.plan_id)
     if not plan or not plan.is_active:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="План не найден или неактивен")
@@ -417,9 +484,11 @@ def purchase_subscription(
 def delete_monitoring(
     monitoring_id: int,
     telegram_id: int = Query(...),
+    auth_user: User = Depends(require_miniapp_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    user = _require_user(db, telegram_id)
+    assert_telegram_id_match(auth_user, telegram_id)
+    user = auth_user
     monitoring = db.scalar(
         select(Monitoring).where(and_(Monitoring.id == monitoring_id, Monitoring.user_id == user.id))
     )
@@ -436,9 +505,11 @@ def monitoring_items(
     monitoring_id: int,
     telegram_id: int = Query(...),
     limit: int = Query(default=50, ge=1, le=200),
+    auth_user: User = Depends(require_miniapp_user),
     db: Session = Depends(get_db),
 ) -> list[MonitoringItemResponse]:
-    user = _require_user(db, telegram_id)
+    assert_telegram_id_match(auth_user, telegram_id)
+    user = auth_user
     monitoring = db.scalar(
         select(Monitoring).where(and_(Monitoring.id == monitoring_id, Monitoring.user_id == user.id))
     )
@@ -471,9 +542,11 @@ def monitoring_items(
 def notifications(
     telegram_id: int = Query(...),
     limit: int = Query(default=50, ge=1, le=200),
+    auth_user: User = Depends(require_miniapp_user),
     db: Session = Depends(get_db),
 ) -> list[NotificationResponse]:
-    user = _require_user(db, telegram_id)
+    assert_telegram_id_match(auth_user, telegram_id)
+    user = auth_user
     notifications_raw = db.scalars(
         select(Notification)
         .where(Notification.user_id == user.id)

@@ -70,6 +70,12 @@
 cp .env.example .env
 ```
 2. Заполнить `BOT_TOKEN` и токены `INTERNAL_API_TOKEN`/`ADMIN_API_TOKEN`.
+   - `BACKEND_URL` — URL backend для запуска компонентов вне Docker (по умолчанию `http://localhost:8001`).
+   - `INTERNAL_BACKEND_URL` — URL backend внутри Docker-сети (по умолчанию `http://miniapp-backend:8000`).
+   - Для Mini App auth через Telegram `initData` задайте:
+     - `MINIAPP_ACCESS_TOKEN_SECRET`
+     - `MINIAPP_REFRESH_TOKEN_SECRET`
+     - `MINIAPP_AUTH_COOKIE_SECURE=true` (для production с HTTPS)
 3. Запуск:
 ```bash
 docker compose up --build

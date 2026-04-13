@@ -5,10 +5,21 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api'
 const client = axios.create({
   baseURL: `${API_BASE}/v1/public`,
   timeout: 20000,
+  withCredentials: true,
 })
 
 export async function authTelegramUser(payload) {
   const { data } = await client.post('/auth/telegram', payload)
+  return data
+}
+
+export async function signInMiniApp(initData) {
+  const { data } = await client.post('/auth/miniapp/signin', { init_data: initData })
+  return data
+}
+
+export async function getAuthSession() {
+  const { data } = await client.get('/auth/session')
   return data
 }
 

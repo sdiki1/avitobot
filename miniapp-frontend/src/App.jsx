@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  authTelegramUser,
+  getAuthSession,
   getMiniappContent,
   getMonitorings,
   getPlans,
   getProfile,
   purchaseSubscription,
   resolveAuthToken,
+  signInMiniApp,
 } from './api'
 
 const TABS = {
@@ -64,12 +65,13 @@ const DEFAULT_MINIAPP_CONTENT = {
   ],
 }
 
-function getTelegramUser() {
+function getTelegramInitData() {
   const webapp = window.Telegram?.WebApp
   if (!webapp) return null
   webapp.ready()
   webapp.expand?.()
-  return webapp.initDataUnsafe?.user || null
+  if (!webapp.initData || typeof webapp.initData !== 'string') return null
+  return webapp.initData
 }
 
 function getAuthTokenFromQuery() {
@@ -250,8 +252,27 @@ export default function App() {
         let resolvedTelegramId = null
         let authError = false
 
+        const initData = getTelegramInitData()
+        if (initData) {
+          try {
+            const payload = await signInMiniApp(initData)
+            resolvedTelegramId = Number(payload.telegram_id)
+          } catch {
+            authError = true
+          }
+        }
+
+        if (!resolvedTelegramId) {
+          try {
+            const session = await getAuthSession()
+            resolvedTelegramId = Number(session.telegram_id)
+          } catch {
+            // ignored: no active cookie session yet
+          }
+        }
+
         const authToken = getAuthTokenFromQuery()
-        if (authToken) {
+        if (!resolvedTelegramId && authToken) {
           try {
             const payload = await resolveAuthToken(authToken)
             resolvedTelegramId = Number(payload.telegram_id)
@@ -260,19 +281,12 @@ export default function App() {
           }
         }
 
-        const user = getTelegramUser()
-        if (!resolvedTelegramId && user?.id) {
-          resolvedTelegramId = Number(user.id)
-          const fullName = [user.first_name, user.last_name].filter(Boolean).join(' ') || null
-          await authTelegramUser({
-            telegram_id: resolvedTelegramId,
-            username: user.username || null,
-            full_name: fullName,
-          })
-        }
-
         if (!resolvedTelegramId) {
-          setStatusMessage(authError ? 'Ошибка: ссылка авторизации недействительна' : 'Ошибка: нет данных авторизации')
+          setStatusMessage(
+            authError
+              ? 'Ошибка: не удалось авторизоваться через Telegram'
+              : 'Ошибка: откройте Mini App через Telegram',
+          )
           return
         }
 
