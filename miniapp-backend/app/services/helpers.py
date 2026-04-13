@@ -398,7 +398,10 @@ def extract_item_photo_url(raw_json: dict[str, Any] | None) -> str | None:
 
 
 def _build_optional_description_block(description: str | None) -> str:
-    cleaned = _cleanup_text(description, 520)
+    if not description:
+        return ""
+    cleaned = " ".join(str(description).split())
+    cleaned = cleaned.replace("<", "‹").replace(">", "›")
     if not cleaned:
         return ""
     return f"\n<blockquote expandable>💬 {html.escape(cleaned)}</blockquote>"
@@ -531,6 +534,10 @@ def _format_published_at_line(published_at: datetime | None) -> str:
         return str(published_at)
 
 
+def _build_published_at_block(published_at: datetime | None) -> str:
+    return f"\n\n🕒 {html.escape(_format_published_at_line(published_at))}"
+
+
 def format_new_item_message(
     title: str,
     price_rub: int | None,
@@ -544,16 +551,15 @@ def format_new_item_message(
     price_line = html.escape(_format_price_line(price_rub))
     location_line = html.escape(location or "Локация не указана")
     title_line = html.escape(_cleanup_text(title, 160) or "Без названия")
-    published_line = html.escape(_format_published_at_line(published_at))
     item_url = html.escape(_build_short_avito_url(url, avito_ad_id))
     return (
         f"{title_line}\n"
         f"💰 {price_line}\n"
         f"📍 {location_line}\n"
-        f"🕒 {published_line}\n"
         f"🔗 {item_url}"
         f"{_build_optional_description_block(description)}"
         f"{_build_optional_seller_stats_block(raw_json)}"
+        f"{_build_published_at_block(published_at)}"
     )
 
 
@@ -572,7 +578,6 @@ def format_price_change_message(
     new_line = html.escape(_format_price_line(new_price_rub))
     location_line = html.escape(location or "Локация не указана")
     title_line = html.escape(_cleanup_text(title, 160) or "Без названия")
-    published_line = html.escape(_format_published_at_line(published_at))
     item_url = html.escape(_build_short_avito_url(url, avito_ad_id))
     return (
         "💸 Изменение стоимости\n"
@@ -580,10 +585,10 @@ def format_price_change_message(
         f"⬇️ Было: {old_line}\n"
         f"💰 Стало: {new_line}\n"
         f"📍 {location_line}\n"
-        f"🕒 {published_line}\n"
         f"🔗 {item_url}"
         f"{_build_optional_description_block(description)}"
         f"{_build_optional_seller_stats_block(raw_json)}"
+        f"{_build_published_at_block(published_at)}"
     )
 
 

@@ -666,12 +666,24 @@ async def notifications_loop(manager: MultiBotManager, backend: BackendAPI, stop
                     photo_url = str(notification.get("photo_url") or "").strip()
                     if photo_url:
                         try:
-                            await runtime.bot.send_photo(
-                                chat_id=notification["telegram_id"],
-                                photo=photo_url,
-                                caption=_fit_photo_caption(text),
-                                parse_mode="HTML",
-                            )
+                            if len(text) > 1000:
+                                await runtime.bot.send_photo(
+                                    chat_id=notification["telegram_id"],
+                                    photo=photo_url,
+                                )
+                                await runtime.bot.send_message(
+                                    chat_id=notification["telegram_id"],
+                                    text=text,
+                                    parse_mode="HTML",
+                                    disable_web_page_preview=True,
+                                )
+                            else:
+                                await runtime.bot.send_photo(
+                                    chat_id=notification["telegram_id"],
+                                    photo=photo_url,
+                                    caption=_fit_photo_caption(text),
+                                    parse_mode="HTML",
+                                )
                         except Exception:
                             await runtime.bot.send_message(
                                 chat_id=notification["telegram_id"],
