@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime
 import os
+import re
 from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any
@@ -143,7 +144,11 @@ def _fit_photo_caption(value: str, max_len: int = 1024) -> str:
     text = (value or "").strip()
     if len(text) <= max_len:
         return text
-    return f"{text[: max_len - 1]}…"
+    plain_text = re.sub(r"</?[^>]+>", "", text)
+    plain_text = plain_text.strip()
+    if len(plain_text) <= max_len:
+        return plain_text
+    return f"{plain_text[: max_len - 1]}…"
 
 
 class BackendAPI:
@@ -665,20 +670,20 @@ async def notifications_loop(manager: MultiBotManager, backend: BackendAPI, stop
                                 chat_id=notification["telegram_id"],
                                 photo=photo_url,
                                 caption=_fit_photo_caption(text),
-                                parse_mode=None,
+                                parse_mode="HTML",
                             )
                         except Exception:
                             await runtime.bot.send_message(
                                 chat_id=notification["telegram_id"],
                                 text=text,
-                                parse_mode=None,
+                                parse_mode="HTML",
                                 disable_web_page_preview=True,
                             )
                     else:
                         await runtime.bot.send_message(
                             chat_id=notification["telegram_id"],
                             text=text,
-                            parse_mode=None,
+                            parse_mode="HTML",
                             disable_web_page_preview=True,
                         )
                     await backend.mark_notification_sent(notification["id"])

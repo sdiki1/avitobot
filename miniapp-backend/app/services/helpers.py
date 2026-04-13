@@ -1,10 +1,13 @@
 from datetime import datetime, timedelta, timezone
 import hashlib
 import hmac
+import html
 import json
 import logging
+import re
 from typing import Any
 from urllib import request as urllib_request
+from urllib.parse import urlsplit
 
 from sqlalchemy import Select, and_, func, select
 from sqlalchemy.orm import Session
@@ -398,7 +401,7 @@ def _build_optional_description_block(description: str | None) -> str:
     cleaned = _cleanup_text(description, 520)
     if not cleaned:
         return ""
-    return f"\n\n💬 {cleaned}"
+    return f"\n<blockquote expandable>💬 {html.escape(cleaned)}</blockquote>"
 
 
 def _ru_plural(count: int, one: str, few: str, many: str) -> str:
@@ -471,37 +474,19 @@ def _first_by_key(raw_json: dict[str, Any] | None, key_parts: tuple[str, ...], p
     return None
 
 
-def _extract_closed_items_line(raw_json: dict[str, Any] | None) -> str | None:
-    if not isinstance(raw_json, dict):
-        return None
-
-    closed_text = _cleanup_text(raw_json.get("closedItemsText"), 80)
-    if closed_text:
-        return closed_text
-
-    completed_count = _first_by_key(raw_json, ("closed", "completed"), _try_int)
-    if completed_count is None:
-        return None
-    noun = _ru_plural(completed_count, "завершённое объявление", "завершённых объявления", "завершённых объявлений")
-    return f"{completed_count} {noun}"
-
-
 def extract_seller_stats_block(raw_json: dict[str, Any] | None) -> str:
     if not isinstance(raw_json, dict):
         return ""
 
     rating = _first_by_key(raw_json, ("rating", "score", "stars"), _try_float)
     reviews_count = _first_by_key(raw_json, ("review", "feedback"), _try_int)
-    closed_line = _extract_closed_items_line(raw_json)
 
     lines: list[str] = []
     if rating is not None:
-        lines.append(f"{rating:.1f} ⭐️")
+        lines.append(f"⭐️ {rating:.1f}")
     if reviews_count is not None:
         noun = _ru_plural(reviews_count, "отзыв", "отзыва", "отзывов")
         lines.append(f"{reviews_count} {noun}")
-    if closed_line:
-        lines.append(closed_line)
 
     if not lines:
         return ""
@@ -512,7 +497,38 @@ def _build_optional_seller_stats_block(raw_json: dict[str, Any] | None) -> str:
     block = extract_seller_stats_block(raw_json)
     if not block:
         return ""
-    return f"\n\n{block}"
+    return f"\n\n{html.escape(block)}"
+
+
+def _build_short_avito_url(url: str, avito_ad_id: str | None = None) -> str:
+    if avito_ad_id:
+        cleaned_id = "".join(ch for ch in str(avito_ad_id) if ch.isdigit())
+        if cleaned_id:
+            return f"https://www.avito.ru/{cleaned_id}"
+
+    parsed = urlsplit(url or "")
+    path = (parsed.path or "").rstrip("/")
+    if path:
+        slug_match = re.search(r"(\d{5,})$", path)
+        if slug_match:
+            return f"https://www.avito.ru/{slug_match.group(1)}"
+
+        direct_match = re.fullmatch(r"/?(\d{5,})", path)
+        if direct_match:
+            return f"https://www.avito.ru/{direct_match.group(1)}"
+
+    return url
+
+
+def _format_published_at_line(published_at: datetime | None) -> str:
+    if not published_at:
+        return "Время публикации не указано"
+    try:
+        if published_at.tzinfo is None:
+            return published_at.strftime("%d.%m.%Y %H:%M")
+        return published_at.astimezone(timezone(timedelta(hours=3))).strftime("%d.%m.%Y %H:%M")
+    except Exception:
+        return str(published_at)
 
 
 def format_new_item_message(
@@ -520,17 +536,22 @@ def format_new_item_message(
     price_rub: int | None,
     url: str,
     location: str | None,
+    published_at: datetime | None = None,
+    avito_ad_id: str | None = None,
     description: str | None = None,
     raw_json: dict[str, Any] | None = None,
 ) -> str:
-    price_line = _format_price_line(price_rub)
-    location_line = location or "Локация не указана"
-    title_line = _cleanup_text(title, 160) or "Без названия"
+    price_line = html.escape(_format_price_line(price_rub))
+    location_line = html.escape(location or "Локация не указана")
+    title_line = html.escape(_cleanup_text(title, 160) or "Без названия")
+    published_line = html.escape(_format_published_at_line(published_at))
+    item_url = html.escape(_build_short_avito_url(url, avito_ad_id))
     return (
         f"{title_line}\n"
         f"💰 {price_line}\n"
         f"📍 {location_line}\n"
-        f"🔗 {url}"
+        f"🕒 {published_line}\n"
+        f"🔗 {item_url}"
         f"{_build_optional_description_block(description)}"
         f"{_build_optional_seller_stats_block(raw_json)}"
     )
@@ -542,20 +563,25 @@ def format_price_change_message(
     new_price_rub: int | None,
     url: str,
     location: str | None,
+    published_at: datetime | None = None,
+    avito_ad_id: str | None = None,
     description: str | None = None,
     raw_json: dict[str, Any] | None = None,
 ) -> str:
-    old_line = _format_price_line(old_price_rub)
-    new_line = _format_price_line(new_price_rub)
-    location_line = location or "Локация не указана"
-    title_line = _cleanup_text(title, 160) or "Без названия"
+    old_line = html.escape(_format_price_line(old_price_rub))
+    new_line = html.escape(_format_price_line(new_price_rub))
+    location_line = html.escape(location or "Локация не указана")
+    title_line = html.escape(_cleanup_text(title, 160) or "Без названия")
+    published_line = html.escape(_format_published_at_line(published_at))
+    item_url = html.escape(_build_short_avito_url(url, avito_ad_id))
     return (
         "💸 Изменение стоимости\n"
         f"{title_line}\n"
         f"⬇️ Было: {old_line}\n"
         f"💰 Стало: {new_line}\n"
         f"📍 {location_line}\n"
-        f"🔗 {url}"
+        f"🕒 {published_line}\n"
+        f"🔗 {item_url}"
         f"{_build_optional_description_block(description)}"
         f"{_build_optional_seller_stats_block(raw_json)}"
     )
