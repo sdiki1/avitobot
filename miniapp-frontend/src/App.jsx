@@ -24,8 +24,7 @@ const SUBSCRIPTION_VIEW = {
 
 const TYPE_OPTIONS = [
   { id: 'standard', label: 'Стандартная', speed: '1.8 секунд' },
-  { id: 'fast', label: 'Ускоренная', speed: '0.9 секунд' },
-  { id: 'turbo', label: 'Скоростная', speed: '0.1 секунда' },
+  { id: 'speed', label: 'Скоростная', speed: '0.1 секунда' },
 ]
 
 const PARAM_OPTIONS = [
@@ -73,14 +72,26 @@ function getTelegramInitData() {
   webapp.disableVerticalSwipes?.()
   try {
     const maybePromise = webapp.requestFullscreen?.()
-    if (maybePromise && typeof maybePromise.catch === 'function') {
-      maybePromise.catch(() => {})
-    }
+    if (maybePromise && typeof maybePromise.catch === 'function') maybePromise.catch(() => {})
   } catch {
     // ignore: not supported in some Telegram clients
   }
   if (!webapp.initData || typeof webapp.initData !== 'string') return null
   return webapp.initData
+}
+
+function forceTelegramFullscreen() {
+  const webapp = window.Telegram?.WebApp
+  if (!webapp) return
+  webapp.ready?.()
+  webapp.expand?.()
+  webapp.disableVerticalSwipes?.()
+  try {
+    const maybePromise = webapp.requestFullscreen?.()
+    if (maybePromise && typeof maybePromise.catch === 'function') maybePromise.catch(() => {})
+  } catch {
+    // ignore: not supported in some Telegram clients
+  }
 }
 
 function getAuthTokenFromQuery() {
@@ -181,6 +192,26 @@ export default function App() {
   const [selectedPeriod, setSelectedPeriod] = useState(7)
   const [useReferralBalance, setUseReferralBalance] = useState(false)
   const [buyDraft, setBuyDraft] = useState({ title: '', url: '' })
+
+  useEffect(() => {
+    forceTelegramFullscreen()
+
+    const retryFast = window.setTimeout(forceTelegramFullscreen, 250)
+    const retrySlow = window.setTimeout(forceTelegramFullscreen, 1200)
+
+    const onFirstInteraction = () => {
+      forceTelegramFullscreen()
+    }
+    window.addEventListener('touchstart', onFirstInteraction, { passive: true, once: true })
+    window.addEventListener('mousedown', onFirstInteraction, { passive: true, once: true })
+
+    return () => {
+      window.clearTimeout(retryFast)
+      window.clearTimeout(retrySlow)
+      window.removeEventListener('touchstart', onFirstInteraction)
+      window.removeEventListener('mousedown', onFirstInteraction)
+    }
+  }, [])
 
   const normalizedMonitorings = useMemo(() => {
     if (monitorings.length > 0) {

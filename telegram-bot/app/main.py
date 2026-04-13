@@ -151,6 +151,28 @@ def _fit_photo_caption(value: str, max_len: int = 1024) -> str:
     return f"{plain_text[: max_len - 1]}…"
 
 
+def _format_plan_line(plan: dict[str, Any]) -> str:
+    name = str(plan.get("name") or "Тариф")
+    price = plan.get("price_rub")
+    links_limit = plan.get("links_limit")
+    duration_days = plan.get("duration_days")
+    base = f"• {name}: {price}₽ | {links_limit} мониторингов | {duration_days} дней"
+    description = str(plan.get("description") or "").strip()
+    if description:
+        return f"{base}\n{description}"
+    return base
+
+
+def _build_plans_message(plans: list[dict[str, Any]]) -> str:
+    if not plans:
+        return "Тарифы пока не настроены в админ-панели."
+    lines = ["Доступные тарифы:"]
+    for plan in plans:
+        lines.append(_format_plan_line(plan))
+    lines.append("\nОформить подписку можно в MiniApp.")
+    return "\n".join(lines)
+
+
 class BackendAPI:
     def __init__(self) -> None:
         self.client = httpx.AsyncClient(timeout=30)
@@ -269,6 +291,14 @@ class BackendAPI:
 def build_router(bot_id: int, backend: BackendAPI, *, is_primary: bool = False) -> Router:
     router = Router()
 
+    async def _send_plans(message: Message, *, with_miniapp_button: bool = False) -> None:
+        plans = await backend.list_plans()
+        text = _build_plans_message(plans)
+        if with_miniapp_button:
+            await message.answer(text, reply_markup=miniapp_keyboard(message.from_user.id))
+            return
+        await message.answer(text)
+
     if is_primary:
         @router.message(CommandStart())
         async def cmd_start_primary(message: Message) -> None:
@@ -292,6 +322,10 @@ def build_router(bot_id: int, backend: BackendAPI, *, is_primary: bool = False) 
                 "Откройте MiniApp, чтобы управлять подпиской и назначенными ботами."
             )
             await message.answer(text, reply_markup=miniapp_keyboard(tg_user.id))
+
+        @router.message(Command("plans"))
+        async def cmd_plans_primary(message: Message) -> None:
+            await _send_plans(message, with_miniapp_button=True)
 
         @router.message(Command("miniapp"))
         async def cmd_miniapp_primary(message: Message) -> None:
@@ -451,16 +485,7 @@ def build_router(bot_id: int, backend: BackendAPI, *, is_primary: bool = False) 
 
     @router.message(Command("plans"))
     async def cmd_plans(message: Message) -> None:
-        plans = await backend.list_plans()
-        if not plans:
-            await message.answer("Тарифы пока не настроены в админ-панели.")
-            return
-        lines = ["Доступные тарифы:"]
-        for plan in plans:
-            lines.append(
-                f"• {plan['name']}: {plan['price_rub']}₽ | {plan['links_limit']} мониторингов | {plan['duration_days']} дней"
-            )
-        await message.answer("\n".join(lines))
+        await _send_plans(message)
 
     @router.message(Command("status"))
     async def cmd_status(message: Message) -> None:
