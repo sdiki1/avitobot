@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html as html_lib
 import json
+import re
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -78,6 +79,24 @@ class AvitoAdapter:
             return raw
 
         return urlunsplit((parsed.scheme, replaced_netloc, parsed.path, parsed.query, parsed.fragment))
+
+    @staticmethod
+    def _ensure_s104_query_param(url: str) -> str:
+        raw = (url or "").strip()
+        if not raw:
+            return raw
+
+        try:
+            parsed = urlsplit(raw)
+        except Exception:
+            return raw
+
+        query = parsed.query or ""
+        if re.search(r"(^|&)s=", query):
+            return raw
+
+        new_query = f"{query}&s=104" if query else "s=104"
+        return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, new_query, parsed.fragment))
 
     @staticmethod
     def find_json_on_page(html_code: str) -> dict[str, Any]:
@@ -242,7 +261,8 @@ class AvitoAdapter:
         result: list[dict[str, Any]] = []
         for ad in ads:
             ad_id = str(ad.id)
-            ad_url = f"https://www.avito.ru{ad.urlPath}" if ad.urlPath else url
+            ad_url_raw = f"https://www.avito.ru{ad.urlPath}" if ad.urlPath else url
+            ad_url = self._ensure_s104_query_param(ad_url_raw)
             price = ad.priceDetailed.value if ad.priceDetailed and ad.priceDetailed.value is not None else None
             published_at = self._to_utc(ad.sortTimeStamp)
 

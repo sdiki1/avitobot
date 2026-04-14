@@ -363,6 +363,7 @@ def pending_notifications(
                 bot_id=monitoring.bot_id,
                 telegram_bot_id=bot.telegram_bot_id if bot else None,
                 monitoring_id=n.monitoring_id,
+                monitoring_url=normalize_monitoring_url(monitoring.url),
                 message=n.message,
                 photo_url=extract_item_photo_url(item.raw_json if item else None),
             )

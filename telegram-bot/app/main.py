@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import os
 import re
 from contextlib import suppress
@@ -14,6 +14,7 @@ from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiogram.exceptions import TelegramRetryAfter
 from aiogram.types import (
     BufferedInputFile,
     BotCommand,
@@ -36,6 +37,7 @@ NOTIFY_FETCH_LIMIT = int(os.getenv("NOTIFY_FETCH_LIMIT", "300"))
 PHOTO_RETRY_ATTEMPTS = int(os.getenv("PHOTO_RETRY_ATTEMPTS", "3"))
 PHOTO_RETRY_BASE_DELAY_SEC = float(os.getenv("PHOTO_RETRY_BASE_DELAY_SEC", "1.5"))
 PHOTO_DOWNLOAD_TIMEOUT_SEC = float(os.getenv("PHOTO_DOWNLOAD_TIMEOUT_SEC", "12"))
+RATE_LIMIT_ALERT_COOLDOWN_SEC = int(os.getenv("RATE_LIMIT_ALERT_COOLDOWN_SEC", "900"))
 
 BTN_START_MONITORING = "▶️ Запустить мониторинг"
 BTN_STOP_MONITORING = "⏹ Остановить мониторинг"
@@ -341,6 +343,64 @@ def _build_plans_message(plans: list[dict[str, Any]]) -> str:
         lines.append(_format_plan_line(plan))
     lines.append("\nОформить подписку можно в MiniApp.")
     return "\n".join(lines)
+
+
+def _is_telegram_rate_limit_error(exc: Exception) -> bool:
+    if isinstance(exc, TelegramRetryAfter):
+        return True
+    text = str(exc).lower()
+    return "too many requests" in text or "retry after" in text or "flood control" in text
+
+
+def _rate_limit_warning_text(monitoring_url: str) -> str:
+    return (
+        "Ссылка слишком активна!\n"
+        f"🔗 Ссылка: {monitoring_url}\n\n"
+        "🤖 Бот отправляет слишком много объявлений в минуту и упирается в лимиты телеграм.\n"
+        "Пожалуйста, используйте ссылки внутри категорий или конкретных городов.\n"
+        "Телеграм ограничивает количество сообщений в минуту, поэтому ссылки с большим количеством объявлений "
+        "в минуту будут пропускать часть объявлений.\n\n"
+        "Это сообщение автоматическое и срабатывает при сильном потоке объявлений. "
+        "Если это происходит редко, просто проигнорируйте его."
+    )
+
+
+async def _maybe_send_rate_limit_warning(
+    runtime: "BotRuntime",
+    notification: dict[str, Any],
+    exc: Exception,
+    cooldowns: dict[tuple[int, int, int], datetime],
+) -> None:
+    if not _is_telegram_rate_limit_error(exc):
+        return
+
+    bot_id = int(notification.get("bot_id") or 0)
+    chat_id = int(notification.get("telegram_id") or 0)
+    monitoring_id = int(notification.get("monitoring_id") or 0)
+    key = (bot_id, chat_id, monitoring_id)
+
+    now = datetime.now(timezone.utc)
+    cooldown_until = cooldowns.get(key)
+    if cooldown_until and now < cooldown_until:
+        return
+
+    monitoring_url = str(notification.get("monitoring_url") or "").strip() or "не указана"
+    text = _rate_limit_warning_text(monitoring_url)
+
+    try:
+        await runtime.bot.send_message(
+            chat_id=chat_id,
+            text=text,
+            disable_web_page_preview=False,
+        )
+        cooldowns[key] = now + timedelta(seconds=max(60, RATE_LIMIT_ALERT_COOLDOWN_SEC))
+    except Exception as warn_exc:
+        logger.warning(
+            "Failed to send rate-limit warning notification_id={} monitoring_id={} error={}",
+            notification.get("id"),
+            monitoring_id,
+            warn_exc,
+        )
 
 
 class BackendAPI:
@@ -848,8 +908,14 @@ async def bots_sync_loop(manager: MultiBotManager, stop_event: asyncio.Event) ->
 
 
 async def notifications_loop(manager: MultiBotManager, backend: BackendAPI, stop_event: asyncio.Event) -> None:
+    rate_limit_cooldowns: dict[tuple[int, int, int], datetime] = {}
+
     while not stop_event.is_set():
         had_notifications = False
+        now = datetime.now(timezone.utc)
+        stale_keys = [key for key, expires_at in rate_limit_cooldowns.items() if expires_at <= now]
+        for key in stale_keys:
+            rate_limit_cooldowns.pop(key, None)
         try:
             notifications = await backend.pending_notifications(limit=max(1, min(NOTIFY_FETCH_LIMIT, 500)))
             had_notifications = bool(notifications)
@@ -890,6 +956,7 @@ async def notifications_loop(manager: MultiBotManager, backend: BackendAPI, stop
                                 photo_url,
                                 exc,
                             )
+                            await _maybe_send_rate_limit_warning(runtime, notification, exc, rate_limit_cooldowns)
                             sent_with_download = False
                             downloaded = await _download_photo_bytes(photo_url)
                             if downloaded:
@@ -942,6 +1009,7 @@ async def notifications_loop(manager: MultiBotManager, backend: BackendAPI, stop
                         )
                     await backend.mark_notification_sent(notification["id"])
                 except Exception as exc:
+                    await _maybe_send_rate_limit_warning(runtime, notification, exc, rate_limit_cooldowns)
                     logger.warning(f"Failed to deliver notification id={notification.get('id')}: {exc}")
         except Exception as exc:
             logger.error(f"Notifications loop failed: {exc}")

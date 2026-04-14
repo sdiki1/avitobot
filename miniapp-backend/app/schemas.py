@@ -292,6 +292,7 @@ class InternalNotificationResponse(BaseModel):
     bot_id: int | None = None
     telegram_bot_id: int | None = None
     monitoring_id: int
+    monitoring_url: str | None = None
     message: str
     photo_url: str | None = None
 

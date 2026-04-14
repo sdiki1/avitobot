@@ -574,24 +574,42 @@ def _build_optional_seller_stats_block(raw_json: dict[str, Any] | None) -> str:
     return f"\n\n{html.escape(block)}"
 
 
+def _ensure_s104_query_param(url: str) -> str:
+    raw = (url or "").strip()
+    if not raw:
+        return raw
+
+    try:
+        parsed = urlsplit(raw)
+    except Exception:
+        return raw
+
+    query = parsed.query or ""
+    if re.search(r"(^|&)s=", query):
+        return raw
+
+    new_query = f"{query}&s=104" if query else "s=104"
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, new_query, parsed.fragment))
+
+
 def _build_short_avito_url(url: str, avito_ad_id: str | None = None) -> str:
     if avito_ad_id:
         cleaned_id = "".join(ch for ch in str(avito_ad_id) if ch.isdigit())
         if cleaned_id:
-            return f"https://www.avito.ru/{cleaned_id}"
+            return _ensure_s104_query_param(f"https://www.avito.ru/{cleaned_id}")
 
     parsed = urlsplit(url or "")
     path = (parsed.path or "").rstrip("/")
     if path:
         slug_match = re.search(r"(\d{5,})$", path)
         if slug_match:
-            return f"https://www.avito.ru/{slug_match.group(1)}"
+            return _ensure_s104_query_param(f"https://www.avito.ru/{slug_match.group(1)}")
 
         direct_match = re.fullmatch(r"/?(\d{5,})", path)
         if direct_match:
-            return f"https://www.avito.ru/{direct_match.group(1)}"
+            return _ensure_s104_query_param(f"https://www.avito.ru/{direct_match.group(1)}")
 
-    return url
+    return _ensure_s104_query_param(url)
 
 
 def _format_published_at_line(published_at: datetime | None) -> str:
