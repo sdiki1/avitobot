@@ -142,9 +142,16 @@ def _looks_like_url(value: str) -> bool:
 
 def _fit_photo_caption(value: str, max_len: int = 1024) -> str:
     text = (value or "").strip()
-    plain_text = re.sub(r"</?[^>]+>", "", text)
-    plain_text = " ".join(plain_text.split())
-    plain_text = plain_text.strip()
+    # Telegram caption parser may reject blockquote tags in some clients/versions.
+    sanitized = (
+        text.replace("<blockquote expandable>", "\n💬 ")
+        .replace("<blockquote>", "\n💬 ")
+        .replace("</blockquote>", "")
+    )
+    if len(sanitized) <= max_len:
+        return sanitized
+    plain_text = re.sub(r"</?[^>]+>", "", sanitized)
+    plain_text = " ".join(plain_text.split()).strip()
     if len(plain_text) <= max_len:
         return plain_text
     return f"{plain_text[: max_len - 1]}…"
@@ -706,6 +713,7 @@ async def notifications_loop(manager: MultiBotManager, backend: BackendAPI, stop
                                     chat_id=notification["telegram_id"],
                                     photo=photo_url,
                                     caption=_fit_photo_caption(text),
+                                    parse_mode="HTML",
                                 )
                         except Exception as exc:
                             logger.warning(
