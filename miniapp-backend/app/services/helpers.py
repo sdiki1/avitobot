@@ -599,8 +599,8 @@ def _format_published_at_line(published_at: datetime | None) -> str:
         return "Время публикации не указано"
     try:
         if published_at.tzinfo is None:
-            return published_at.strftime("%d.%m.%Y %H:%M")
-        return published_at.astimezone(timezone(timedelta(hours=3))).strftime("%d.%m.%Y %H:%M")
+            return published_at.strftime("%d.%m.%Y %H:%M:%S")
+        return published_at.astimezone(timezone(timedelta(hours=3))).strftime("%d.%m.%Y %H:%M:%S")
     except Exception:
         return str(published_at)
 
