@@ -405,9 +405,27 @@ def extract_item_description(raw_json: dict[str, Any] | None) -> str | None:
     return _cleanup_text(raw_json.get("description"), 520)
 
 
+def _normalize_media_url(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+
+    raw = value.strip()
+    if not raw:
+        return None
+
+    if raw.startswith("//"):
+        return f"https:{raw}"
+    if raw.startswith("/"):
+        return f"https://www.avito.ru{raw}"
+    if raw.startswith(("http://", "https://")):
+        return raw
+    return None
+
+
 def _pick_first_url(value: Any) -> str | None:
-    if isinstance(value, str) and value.startswith(("http://", "https://")):
-        return value
+    normalized = _normalize_media_url(value)
+    if normalized:
+        return normalized
     if isinstance(value, dict):
         for nested in value.values():
             found = _pick_first_url(nested)
@@ -428,19 +446,25 @@ def extract_item_photo_url(raw_json: dict[str, Any] | None) -> str | None:
     gallery = raw_json.get("gallery")
     if isinstance(gallery, dict):
         for key in ("imageLargeUrl", "imageUrl", "imageVipUrl", "imageLargeVipUrl"):
-            candidate = gallery.get(key)
-            if isinstance(candidate, str) and candidate.startswith(("http://", "https://")):
-                return candidate
+            found = _pick_first_url(gallery.get(key))
+            if found:
+                return found
 
     images = raw_json.get("images")
     found_from_images = _pick_first_url(images)
     if found_from_images:
         return found_from_images
 
-    for key in ("phoneImage", "imageUrl"):
-        candidate = raw_json.get(key)
-        if isinstance(candidate, str) and candidate.startswith(("http://", "https://")):
-            return candidate
+    for key in ("phoneImage", "imageUrl", "mainImage", "coverImage", "previewImage"):
+        found = _pick_first_url(raw_json.get(key))
+        if found:
+            return found
+
+    for nested_key in ("gallery", "images", "photo", "photos", "image", "picture", "media"):
+        found = _pick_first_url(raw_json.get(nested_key))
+        if found:
+            return found
+
     return None
 
 

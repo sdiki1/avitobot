@@ -142,9 +142,8 @@ def _looks_like_url(value: str) -> bool:
 
 def _fit_photo_caption(value: str, max_len: int = 1024) -> str:
     text = (value or "").strip()
-    if len(text) <= max_len:
-        return text
     plain_text = re.sub(r"</?[^>]+>", "", text)
+    plain_text = " ".join(plain_text.split())
     plain_text = plain_text.strip()
     if len(plain_text) <= max_len:
         return plain_text
@@ -707,21 +706,26 @@ async def notifications_loop(manager: MultiBotManager, backend: BackendAPI, stop
                                     chat_id=notification["telegram_id"],
                                     photo=photo_url,
                                     caption=_fit_photo_caption(text),
-                                    parse_mode="HTML",
                                 )
-                        except Exception:
+                        except Exception as exc:
+                            logger.warning(
+                                "send_photo failed for notification id={} photo_url={}: {}",
+                                notification.get("id"),
+                                photo_url,
+                                exc,
+                            )
                             await runtime.bot.send_message(
                                 chat_id=notification["telegram_id"],
                                 text=text,
                                 parse_mode="HTML",
-                                disable_web_page_preview=True,
+                                disable_web_page_preview=False,
                             )
                     else:
                         await runtime.bot.send_message(
                             chat_id=notification["telegram_id"],
                             text=text,
                             parse_mode="HTML",
-                            disable_web_page_preview=True,
+                            disable_web_page_preview=False,
                         )
                     await backend.mark_notification_sent(notification["id"])
                 except Exception as exc:
