@@ -28,7 +28,11 @@ BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8001").rstrip("/")
 INTERNAL_API_TOKEN = os.getenv("INTERNAL_API_TOKEN", "change_me_internal_token")
 MINIAPP_PUBLIC_URL = os.getenv("MINIAPP_PUBLIC_URL", "http://localhost")
 BOTS_REFRESH_SEC = int(os.getenv("BOTS_REFRESH_SEC", "15"))
-NOTIFY_POLL_SEC = int(os.getenv("NOTIFY_POLL_SEC", "4"))
+NOTIFY_POLL_SEC = float(os.getenv("NOTIFY_POLL_SEC", "1"))
+NOTIFY_BACKLOG_POLL_SEC = float(os.getenv("NOTIFY_BACKLOG_POLL_SEC", "0.2"))
+NOTIFY_FETCH_LIMIT = int(os.getenv("NOTIFY_FETCH_LIMIT", "300"))
+PHOTO_RETRY_ATTEMPTS = int(os.getenv("PHOTO_RETRY_ATTEMPTS", "3"))
+PHOTO_RETRY_BASE_DELAY_SEC = float(os.getenv("PHOTO_RETRY_BASE_DELAY_SEC", "1.5"))
 
 BTN_START_MONITORING = "▶️ Запустить мониторинг"
 BTN_STOP_MONITORING = "⏹ Остановить мониторинг"
@@ -155,6 +159,60 @@ def _fit_photo_caption(value: str, max_len: int = 1024) -> str:
     if len(plain_text) <= max_len:
         return plain_text
     return f"{plain_text[: max_len - 1]}…"
+
+
+def _is_retryable_photo_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    retryable_markers = (
+        "failed to get http url content",
+        "wrong file identifier/http url specified",
+        "timed out",
+        "timeout",
+        "temporarily unavailable",
+    )
+    return any(marker in text for marker in retryable_markers)
+
+
+async def _send_photo_with_retry(
+    bot: Bot,
+    chat_id: int,
+    photo_url: str,
+    caption: str | None = None,
+    parse_mode: str | None = None,
+) -> None:
+    attempts = max(1, PHOTO_RETRY_ATTEMPTS)
+    last_exc: Exception | None = None
+
+    for attempt in range(1, attempts + 1):
+        try:
+            payload = {
+                "chat_id": chat_id,
+                "photo": photo_url,
+            }
+            if caption is not None:
+                payload["caption"] = caption
+            if parse_mode is not None:
+                payload["parse_mode"] = parse_mode
+            await bot.send_photo(**payload)
+            return
+        except Exception as exc:
+            last_exc = exc
+            if attempt >= attempts or not _is_retryable_photo_error(exc):
+                raise
+
+            delay = max(0.2, PHOTO_RETRY_BASE_DELAY_SEC) * attempt
+            logger.warning(
+                "send_photo retry {}/{} chat_id={} url={} after error: {}",
+                attempt,
+                attempts,
+                chat_id,
+                photo_url,
+                exc,
+            )
+            await asyncio.sleep(delay)
+
+    if last_exc is not None:
+        raise last_exc
 
 
 def _format_plan_line(plan: dict[str, Any]) -> str:
@@ -685,8 +743,10 @@ async def bots_sync_loop(manager: MultiBotManager, stop_event: asyncio.Event) ->
 
 async def notifications_loop(manager: MultiBotManager, backend: BackendAPI, stop_event: asyncio.Event) -> None:
     while not stop_event.is_set():
+        had_notifications = False
         try:
-            notifications = await backend.pending_notifications(limit=100)
+            notifications = await backend.pending_notifications(limit=max(1, min(NOTIFY_FETCH_LIMIT, 500)))
+            had_notifications = bool(notifications)
             for notification in notifications:
                 bot_id = int(notification.get("bot_id") or 0)
                 runtime = manager.runtimes.get(bot_id)
@@ -698,9 +758,10 @@ async def notifications_loop(manager: MultiBotManager, backend: BackendAPI, stop
                     if photo_url:
                         try:
                             if len(text) > 1000:
-                                await runtime.bot.send_photo(
+                                await _send_photo_with_retry(
+                                    bot=runtime.bot,
                                     chat_id=notification["telegram_id"],
-                                    photo=photo_url,
+                                    photo_url=photo_url,
                                 )
                                 await runtime.bot.send_message(
                                     chat_id=notification["telegram_id"],
@@ -709,9 +770,10 @@ async def notifications_loop(manager: MultiBotManager, backend: BackendAPI, stop
                                     disable_web_page_preview=True,
                                 )
                             else:
-                                await runtime.bot.send_photo(
+                                await _send_photo_with_retry(
+                                    bot=runtime.bot,
                                     chat_id=notification["telegram_id"],
-                                    photo=photo_url,
+                                    photo_url=photo_url,
                                     caption=_fit_photo_caption(text),
                                     parse_mode="HTML",
                                 )
@@ -741,7 +803,8 @@ async def notifications_loop(manager: MultiBotManager, backend: BackendAPI, stop
         except Exception as exc:
             logger.error(f"Notifications loop failed: {exc}")
 
-        await asyncio.sleep(NOTIFY_POLL_SEC)
+        sleep_for = NOTIFY_BACKLOG_POLL_SEC if had_notifications else NOTIFY_POLL_SEC
+        await asyncio.sleep(max(0.05, sleep_for))
 
 
 async def main() -> None:
