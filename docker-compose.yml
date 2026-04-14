@@ -54,7 +54,7 @@ services:
     build:
       context: ./telegram-bot
     container_name: avitobot-bot
-    restart: unless-stopped
+    restart: always
     env_file:
       - .env
     environment:
