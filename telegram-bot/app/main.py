@@ -7,6 +7,7 @@ import re
 from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 from aiogram import Bot, Dispatcher, F, Router
@@ -14,6 +15,7 @@ from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
+    BufferedInputFile,
     BotCommand,
     KeyboardButton,
     Message,
@@ -33,6 +35,7 @@ NOTIFY_BACKLOG_POLL_SEC = float(os.getenv("NOTIFY_BACKLOG_POLL_SEC", "0.2"))
 NOTIFY_FETCH_LIMIT = int(os.getenv("NOTIFY_FETCH_LIMIT", "300"))
 PHOTO_RETRY_ATTEMPTS = int(os.getenv("PHOTO_RETRY_ATTEMPTS", "3"))
 PHOTO_RETRY_BASE_DELAY_SEC = float(os.getenv("PHOTO_RETRY_BASE_DELAY_SEC", "1.5"))
+PHOTO_DOWNLOAD_TIMEOUT_SEC = float(os.getenv("PHOTO_DOWNLOAD_TIMEOUT_SEC", "12"))
 
 BTN_START_MONITORING = "▶️ Запустить мониторинг"
 BTN_STOP_MONITORING = "⏹ Остановить мониторинг"
@@ -165,6 +168,7 @@ def _is_retryable_photo_error(exc: Exception) -> bool:
     text = str(exc).lower()
     retryable_markers = (
         "failed to get http url content",
+        "wrong type of the web page content",
         "wrong file identifier/http url specified",
         "timed out",
         "timeout",
@@ -209,6 +213,114 @@ async def _send_photo_with_retry(
                 photo_url,
                 exc,
             )
+            await asyncio.sleep(delay)
+
+    if last_exc is not None:
+        raise last_exc
+
+
+def _guess_extension_from_content_type(content_type: str) -> str:
+    ct = (content_type or "").lower()
+    if "png" in ct:
+        return "png"
+    if "webp" in ct:
+        return "webp"
+    if "gif" in ct:
+        return "gif"
+    return "jpg"
+
+
+def _guess_extension_from_bytes(data: bytes) -> str:
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if data.startswith(b"GIF87a") or data.startswith(b"GIF89a"):
+        return "gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "webp"
+    return "jpg"
+
+
+def _build_photo_filename(photo_url: str, content_type: str, data: bytes) -> str:
+    path = urlsplit(photo_url).path or ""
+    basename = path.rsplit("/", 1)[-1].strip()
+    ext = _guess_extension_from_content_type(content_type)
+    if "." not in basename:
+        return f"photo.{ext}"
+    return basename
+
+
+async def _download_photo_bytes(photo_url: str) -> tuple[bytes, str] | None:
+    candidates = [photo_url]
+    if "?" in photo_url:
+        candidates.append(photo_url.split("?", 1)[0])
+
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/126.0.0.0 Safari/537.36"
+        ),
+        "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+        "Referer": "https://www.avito.ru/",
+    }
+
+    timeout = max(2.0, PHOTO_DOWNLOAD_TIMEOUT_SEC)
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, headers=headers) as client:
+        for candidate in candidates:
+            try:
+                response = await client.get(candidate)
+                if response.status_code >= 400:
+                    continue
+                data = response.content or b""
+                if not data:
+                    continue
+                if len(data) > 10 * 1024 * 1024:
+                    continue
+
+                content_type = response.headers.get("content-type", "")
+                if "image/" not in content_type.lower():
+                    guessed = _guess_extension_from_bytes(data)
+                    if guessed not in {"jpg", "png", "webp", "gif"}:
+                        continue
+                    filename = f"photo.{guessed}"
+                    return data, filename
+
+                filename = _build_photo_filename(candidate, content_type, data)
+                return data, filename
+            except Exception:
+                continue
+
+    return None
+
+
+async def _send_downloaded_photo_with_retry(
+    bot: Bot,
+    chat_id: int,
+    photo_data: bytes,
+    filename: str,
+    caption: str | None = None,
+    parse_mode: str | None = None,
+) -> None:
+    attempts = max(1, PHOTO_RETRY_ATTEMPTS)
+    last_exc: Exception | None = None
+
+    for attempt in range(1, attempts + 1):
+        try:
+            payload = {
+                "chat_id": chat_id,
+                "photo": BufferedInputFile(photo_data, filename=filename or "photo.jpg"),
+            }
+            if caption is not None:
+                payload["caption"] = caption
+            if parse_mode is not None:
+                payload["parse_mode"] = parse_mode
+            await bot.send_photo(**payload)
+            return
+        except Exception as exc:
+            last_exc = exc
+            if attempt >= attempts:
+                raise
+            delay = max(0.2, PHOTO_RETRY_BASE_DELAY_SEC) * attempt
             await asyncio.sleep(delay)
 
     if last_exc is not None:
@@ -784,12 +896,49 @@ async def notifications_loop(manager: MultiBotManager, backend: BackendAPI, stop
                                 photo_url,
                                 exc,
                             )
-                            await runtime.bot.send_message(
-                                chat_id=notification["telegram_id"],
-                                text=text,
-                                parse_mode="HTML",
-                                disable_web_page_preview=False,
-                            )
+                            sent_with_download = False
+                            downloaded = await _download_photo_bytes(photo_url)
+                            if downloaded:
+                                photo_data, filename = downloaded
+                                try:
+                                    if len(text) > 1000:
+                                        await _send_downloaded_photo_with_retry(
+                                            bot=runtime.bot,
+                                            chat_id=notification["telegram_id"],
+                                            photo_data=photo_data,
+                                            filename=filename,
+                                        )
+                                        await runtime.bot.send_message(
+                                            chat_id=notification["telegram_id"],
+                                            text=text,
+                                            parse_mode="HTML",
+                                            disable_web_page_preview=True,
+                                        )
+                                    else:
+                                        await _send_downloaded_photo_with_retry(
+                                            bot=runtime.bot,
+                                            chat_id=notification["telegram_id"],
+                                            photo_data=photo_data,
+                                            filename=filename,
+                                            caption=_fit_photo_caption(text),
+                                            parse_mode="HTML",
+                                        )
+                                    sent_with_download = True
+                                except Exception as download_exc:
+                                    logger.warning(
+                                        "send_photo(downloaded) failed for notification id={} photo_url={}: {}",
+                                        notification.get("id"),
+                                        photo_url,
+                                        download_exc,
+                                    )
+
+                            if not sent_with_download:
+                                await runtime.bot.send_message(
+                                    chat_id=notification["telegram_id"],
+                                    text=text,
+                                    parse_mode="HTML",
+                                    disable_web_page_preview=False,
+                                )
                     else:
                         await runtime.bot.send_message(
                             chat_id=notification["telegram_id"],

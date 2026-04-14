@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 from typing import Any
 
@@ -7,7 +8,7 @@ from loguru import logger
 import requests
 
 from app.avito_adapter import AvitoAdapter
-from app.config import BACKEND_URL, INTERNAL_API_TOKEN, POLL_INTERVAL_SEC, REQUEST_TIMEOUT_SEC
+from app.config import BACKEND_URL, INTERNAL_API_TOKEN, PARSER_MAX_WORKERS, POLL_INTERVAL_SEC, REQUEST_TIMEOUT_SEC
 
 
 def backend_headers() -> dict[str, str]:
@@ -32,9 +33,17 @@ def push_scan_result(monitoring_id: int, items: list[dict[str, Any]]) -> dict[st
     return response.json()
 
 
+def process_monitoring(mon: dict[str, Any]) -> tuple[int, str, int, dict[str, Any]]:
+    mon_id = mon["monitoring_id"]
+    mon_url = mon["url"]
+    adapter = AvitoAdapter()
+    items = adapter.parse_monitoring(mon)
+    result = push_scan_result(mon_id, items)
+    return mon_id, mon_url, len(items), result
+
+
 def main() -> None:
     logger.info("Avito parser worker started")
-    adapter = AvitoAdapter()
 
     while True:
         cycle_started = time.time()
@@ -47,23 +56,27 @@ def main() -> None:
 
         logger.info(f"Scan cycle started, monitorings={len(monitorings)}")
 
-        for mon in monitorings:
-            mon_id = mon["monitoring_id"]
-            mon_url = mon["url"]
-            try:
-                items = adapter.parse_monitoring(mon)
-                result = push_scan_result(mon_id, items)
-                logger.info(
-                    "monitoring={} url={} parsed={} created={} updated={} price_changes={}",
-                    mon_id,
-                    mon_url,
-                    len(items),
-                    result.get("created_items", 0),
-                    result.get("updated_items", 0),
-                    result.get("price_changes", 0),
-                )
-            except Exception as exc:
-                logger.warning(f"monitoring={mon_id} url={mon_url} failed: {exc}")
+        if monitorings:
+            workers = max(1, min(PARSER_MAX_WORKERS, len(monitorings)))
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                futures = {pool.submit(process_monitoring, mon): mon for mon in monitorings}
+                for future in as_completed(futures):
+                    mon = futures[future]
+                    mon_id = mon["monitoring_id"]
+                    mon_url = mon["url"]
+                    try:
+                        done_mon_id, done_mon_url, parsed_count, result = future.result()
+                        logger.info(
+                            "monitoring={} url={} parsed={} created={} updated={} price_changes={}",
+                            done_mon_id,
+                            done_mon_url,
+                            parsed_count,
+                            result.get("created_items", 0),
+                            result.get("updated_items", 0),
+                            result.get("price_changes", 0),
+                        )
+                    except Exception as exc:
+                        logger.warning(f"monitoring={mon_id} url={mon_url} failed: {exc}")
 
         elapsed = int(time.time() - cycle_started)
         sleep_for = max(POLL_INTERVAL_SEC - elapsed, 5)
