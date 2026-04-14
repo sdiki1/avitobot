@@ -475,7 +475,7 @@ def _build_optional_description_block(description: str | None) -> str:
     cleaned = cleaned.replace("<", "‹").replace(">", "›")
     if not cleaned:
         return ""
-    return f"\n<blockquote expandable>💬 {html.escape(cleaned)}</blockquote>"
+    return f"\n<blockquote expandable>{html.escape(cleaned)}</blockquote>"
 
 
 def _ru_plural(count: int, one: str, few: str, many: str) -> str:

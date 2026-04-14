@@ -149,15 +149,9 @@ def _looks_like_url(value: str) -> bool:
 
 def _fit_photo_caption(value: str, max_len: int = 1024) -> str:
     text = (value or "").strip()
-    # Telegram caption parser may reject blockquote tags in some clients/versions.
-    sanitized = (
-        text.replace("<blockquote expandable>", "\n💬 ")
-        .replace("<blockquote>", "\n💬 ")
-        .replace("</blockquote>", "")
-    )
-    if len(sanitized) <= max_len:
-        return sanitized
-    plain_text = re.sub(r"</?[^>]+>", "", sanitized)
+    if len(text) <= max_len:
+        return text
+    plain_text = re.sub(r"</?[^>]+>", "", text)
     plain_text = " ".join(plain_text.split()).strip()
     if len(plain_text) <= max_len:
         return plain_text
