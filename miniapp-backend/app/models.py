@@ -127,6 +127,7 @@ class Monitoring(Base):
         onupdate=func.now(),
     )
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    notify_since_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     user = relationship("User")
     bot = relationship("TelegramBot")

@@ -28,7 +28,7 @@ from app.services.helpers import (
     normalize_proxy_url,
     now_utc,
 )
-from app.services.notification_queue import enqueue_notification
+from app.services.notification_queue import enqueue_notification, purge_monitoring_notifications
 
 router = APIRouter(prefix="/internal", tags=["internal"], dependencies=[Depends(require_internal_token)])
 
@@ -75,6 +75,28 @@ def _require_active_subscription(db: Session, user_id: int) -> UserSubscription:
     if not active_sub:
         raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail="Нет активной подписки")
     return active_sub
+
+
+def _clear_monitoring_notifications(db: Session, monitoring: Monitoring) -> tuple[int, int]:
+    sent_at = now_utc()
+    pending_result = db.execute(
+        update(Notification)
+        .where(
+            and_(
+                Notification.monitoring_id == monitoring.id,
+                Notification.status == "pending",
+            )
+        )
+        .values(
+            status="sent",
+            sent_at=sent_at,
+        )
+    )
+    cleared_pending = int(pending_result.rowcount or 0)
+    cleared_queue = 0
+    if monitoring.bot_id:
+        cleared_queue = int(purge_monitoring_notifications(int(monitoring.bot_id), int(monitoring.id)) or 0)
+    return cleared_pending, cleared_queue
 
 
 @router.get("/bots/active", response_model=list[InternalBotConfigResponse])
@@ -210,16 +232,19 @@ def save_scan_result(monitoring_id: int, payload: InternalScanPayload, db: Sessi
     monitoring = db.get(Monitoring, monitoring_id)
     if not monitoring:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Monitoring not found")
+    now = now_utc()
     if not monitoring.is_active:
-        monitoring.last_checked_at = now_utc()
+        monitoring.last_checked_at = now
         db.commit()
         return {"ok": True, "created_items": 0, "updated_items": 0, "price_changes": 0, "enqueued": 0}
 
     user = db.get(User, monitoring.user_id)
     if not user or monitoring.bot_id is None:
-        monitoring.last_checked_at = now_utc()
+        monitoring.last_checked_at = now
         db.commit()
         return {"ok": True, "created_items": 0, "updated_items": 0, "price_changes": 0, "enqueued": 0}
+
+    notify_since_at = monitoring.notify_since_at
 
     created = 0
     touched = 0
@@ -302,40 +327,47 @@ def save_scan_result(monitoring_id: int, payload: InternalScanPayload, db: Sessi
         db.add(db_item)
         db.flush()
 
-        notification = Notification(
-            user_id=monitoring.user_id,
-            monitoring_id=monitoring_id,
-            item_id=db_item.id,
-            message=format_new_item_message(
-                title=db_item.title,
-                price_rub=db_item.price_rub,
-                url=db_item.url,
-                published_at=db_item.published_at,
-                avito_ad_id=db_item.avito_ad_id,
-                location=db_item.location,
-                description=extract_item_description(db_item.raw_json),
-                raw_json=db_item.raw_json,
-                include_description=monitoring.include_description,
-                include_seller_info=monitoring.include_seller_info,
-            ),
-            status="pending",
-        )
-        db.add(notification)
-        db.flush()
-        queue_payloads.append(
-            {
-                "id": notification.id,
-                "telegram_id": user.telegram_id,
-                "bot_id": monitoring.bot_id,
-                "monitoring_id": monitoring.id,
-                "monitoring_url": normalize_monitoring_url(monitoring.url),
-                "message": notification.message,
-                "photo_url": extract_item_photo_url(db_item.raw_json) if monitoring.include_photo else None,
-            }
-        )
+        should_notify_new_item = True
+        if notify_since_at is not None:
+            published_at = db_item.published_at
+            if published_at is None or published_at <= notify_since_at:
+                should_notify_new_item = False
+
+        if should_notify_new_item:
+            notification = Notification(
+                user_id=monitoring.user_id,
+                monitoring_id=monitoring_id,
+                item_id=db_item.id,
+                message=format_new_item_message(
+                    title=db_item.title,
+                    price_rub=db_item.price_rub,
+                    url=db_item.url,
+                    published_at=db_item.published_at,
+                    avito_ad_id=db_item.avito_ad_id,
+                    location=db_item.location,
+                    description=extract_item_description(db_item.raw_json),
+                    raw_json=db_item.raw_json,
+                    include_description=monitoring.include_description,
+                    include_seller_info=monitoring.include_seller_info,
+                ),
+                status="pending",
+            )
+            db.add(notification)
+            db.flush()
+            queue_payloads.append(
+                {
+                    "id": notification.id,
+                    "telegram_id": user.telegram_id,
+                    "bot_id": monitoring.bot_id,
+                    "monitoring_id": monitoring.id,
+                    "monitoring_url": normalize_monitoring_url(monitoring.url),
+                    "message": notification.message,
+                    "photo_url": extract_item_photo_url(db_item.raw_json) if monitoring.include_photo else None,
+                }
+            )
         created += 1
 
-    monitoring.last_checked_at = now_utc()
+    monitoring.last_checked_at = now
     db.commit()
 
     enqueued = 0
@@ -386,7 +418,9 @@ def bot_start_monitoring(payload: InternalBotCommandRequest, db: Session = Depen
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Сначала задайте ссылку командой /change_link https://www.avito.ru/...",
         )
+    _clear_monitoring_notifications(db, monitoring)
     monitoring.is_active = True
+    monitoring.notify_since_at = now_utc()
     db.commit()
     db.refresh(monitoring)
     return _to_bot_lookup_schema(monitoring)
@@ -395,6 +429,7 @@ def bot_start_monitoring(payload: InternalBotCommandRequest, db: Session = Depen
 @router.post("/bot-monitoring/stop", response_model=InternalBotLookupResponse)
 def bot_stop_monitoring(payload: InternalBotCommandRequest, db: Session = Depends(get_db)) -> InternalBotLookupResponse:
     monitoring = _resolve_user_monitoring(db, telegram_id=payload.telegram_id, bot_id=payload.bot_id)
+    _clear_monitoring_notifications(db, monitoring)
     monitoring.is_active = False
     db.commit()
     db.refresh(monitoring)
