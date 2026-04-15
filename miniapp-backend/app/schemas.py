@@ -360,6 +360,10 @@ class InternalProxyBlockedRequest(BaseModel):
     source_url: str | None = None
 
 
+class InternalNotificationsSentBatchRequest(BaseModel):
+    notification_ids: list[int] = Field(default_factory=list)
+
+
 class MonitoringAdminUpdate(BaseModel):
     title: str | None = None
     url: str | None = None

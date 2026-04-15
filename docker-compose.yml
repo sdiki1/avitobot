@@ -17,6 +17,19 @@ services:
       timeout: 5s
       retries: 5
 
+  redis:
+    image: redis:7-alpine
+    container_name: avitobot-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
   miniapp-backend:
     build:
       context: ./miniapp-backend
@@ -29,9 +42,13 @@ services:
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-change_me_internal_token}
       ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:-change_me_admin_token}
       MINIAPP_AUTH_SECRET: ${MINIAPP_AUTH_SECRET:-change_me_miniapp_auth_secret}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      REDIS_NOTIFY_QUEUE_PREFIX: ${REDIS_NOTIFY_QUEUE_PREFIX:-notify:bot:}
       CORS_ORIGINS: "*"
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   avito-parser:
@@ -62,11 +79,15 @@ services:
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-change_me_internal_token}
       MINIAPP_PUBLIC_URL: ${MINIAPP_PUBLIC_URL:-http://localhost}
       MINIAPP_AUTH_SECRET: ${MINIAPP_AUTH_SECRET:-change_me_miniapp_auth_secret}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      REDIS_NOTIFY_QUEUE_PREFIX: ${REDIS_NOTIFY_QUEUE_PREFIX:-notify:bot:}
       BOTS_REFRESH_SEC: ${BOTS_REFRESH_SEC:-15}
       NOTIFY_POLL_SEC: ${NOTIFY_POLL_SEC:-4}
     depends_on:
       miniapp-backend:
         condition: service_started
+      redis:
+        condition: service_healthy
 
   miniapp-frontend:
     build:
@@ -117,3 +138,4 @@ services:
 
 volumes:
   db_data:
+  redis_data:

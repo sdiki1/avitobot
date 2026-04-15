@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections import deque
 from datetime import datetime, timedelta, timezone
+import json
 import os
 import re
 from contextlib import suppress
@@ -11,6 +12,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import httpx
+import redis.asyncio as aioredis
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
@@ -36,13 +38,16 @@ NOTIFY_POLL_SEC = float(os.getenv("NOTIFY_POLL_SEC", "1"))
 NOTIFY_BACKLOG_POLL_SEC = float(os.getenv("NOTIFY_BACKLOG_POLL_SEC", "0.2"))
 NOTIFY_FETCH_LIMIT = int(os.getenv("NOTIFY_FETCH_LIMIT", "300"))
 NOTIFY_SEND_CONCURRENCY = int(os.getenv("NOTIFY_SEND_CONCURRENCY", "8"))
+REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
+REDIS_NOTIFY_QUEUE_PREFIX = os.getenv("REDIS_NOTIFY_QUEUE_PREFIX", "notify:bot:")
 PHOTO_RETRY_ATTEMPTS = int(os.getenv("PHOTO_RETRY_ATTEMPTS", "3"))
 PHOTO_RETRY_BASE_DELAY_SEC = float(os.getenv("PHOTO_RETRY_BASE_DELAY_SEC", "1.5"))
 PHOTO_DOWNLOAD_TIMEOUT_SEC = float(os.getenv("PHOTO_DOWNLOAD_TIMEOUT_SEC", "12"))
 RATE_LIMIT_ALERT_COOLDOWN_SEC = int(os.getenv("RATE_LIMIT_ALERT_COOLDOWN_SEC", "900"))
-MONITORING_BURST_WINDOW_SEC = float(os.getenv("MONITORING_BURST_WINDOW_SEC", "30"))
-MONITORING_BURST_MAX_MESSAGES = int(os.getenv("MONITORING_BURST_MAX_MESSAGES", "10"))
-MONITORING_BURST_ALERT_COOLDOWN_SEC = int(os.getenv("MONITORING_BURST_ALERT_COOLDOWN_SEC", "120"))
+USER_RATE_LIMIT_WINDOW_SEC = float(os.getenv("USER_RATE_LIMIT_WINDOW_SEC", "60"))
+USER_RATE_LIMIT_MAX_MESSAGES = int(os.getenv("USER_RATE_LIMIT_MAX_MESSAGES", "10"))
+USER_RATE_LIMIT_ALERT_COOLDOWN_SEC = int(os.getenv("USER_RATE_LIMIT_ALERT_COOLDOWN_SEC", "120"))
+MONITORING_STATE_CACHE_SEC = float(os.getenv("MONITORING_STATE_CACHE_SEC", "2.0"))
 
 BTN_START_MONITORING = "▶️ Запустить мониторинг"
 BTN_STOP_MONITORING = "⏹ Остановить мониторинг"
@@ -65,6 +70,10 @@ def has_valid_bot_token(token: str) -> bool:
 def build_miniapp_url(telegram_id: int) -> str:
     _ = telegram_id
     return MINIAPP_PUBLIC_URL
+
+
+def redis_queue_key_for_bot(bot_id: int) -> str:
+    return f"{REDIS_NOTIFY_QUEUE_PREFIX}{int(bot_id)}"
 
 
 def miniapp_keyboard(telegram_id: int) -> ReplyKeyboardMarkup:
@@ -401,11 +410,14 @@ def _rate_limit_warning_text(monitoring_url: str) -> str:
 
 def _monitoring_burst_warning_text(monitoring_url: str) -> str:
     return (
-        "Ссылка слишком активна!\n"
+        "⏸ Ссылка слишком активна!\n"
         f"🔗 Ссылка: {monitoring_url}\n\n"
-        "За последние 30 секунд найдено слишком много объявлений.\n"
-        "Отправлено только первые 10, остальные пропущены.\n\n"
-        "Сузьте фильтр: используйте категории, город и ограничения по цене."
+        "🤖 Бот отправляет слишком много объвлений в минуту и упирается в лимиты телеграм.\n"
+        "Пожалуйста, используйте ссылки внутри категорий или конкретных городов.\n"
+        "Телеграм ограничивает количество сообщений в минуту, поэтому ссылки с большим количеством объявлений "
+        "в минуту будут пропускать часть объявлений.\n\n"
+        "Это сообщение автоматическое и срабатывает при сильном потоке объявлений. "
+        "Если это происходит редко, просто проигнорируйте его."
     )
 
 
@@ -473,8 +485,8 @@ async def _maybe_send_monitoring_burst_warning(
         )
         cooldowns[key] = now + timedelta(
             seconds=max(
-                int(max(1.0, MONITORING_BURST_WINDOW_SEC)),
-                max(30, MONITORING_BURST_ALERT_COOLDOWN_SEC),
+                int(max(1.0, USER_RATE_LIMIT_WINDOW_SEC)),
+                max(30, USER_RATE_LIMIT_ALERT_COOLDOWN_SEC),
             )
         )
     except Exception as warn_exc:
@@ -590,6 +602,13 @@ class BackendAPI:
         )
         return response.status_code, _response_json(response)
 
+    async def monitoring_state(self, monitoring_id: int) -> tuple[int, dict[str, Any]]:
+        response = await self.client.get(
+            f"{BACKEND_URL}/api/v1/internal/monitorings/{monitoring_id}/state",
+            headers={"X-Internal-Token": INTERNAL_API_TOKEN},
+        )
+        return response.status_code, _response_json(response)
+
     async def pending_notifications(self, limit: int = 100) -> list[dict[str, Any]]:
         response = await self.client.get(
             f"{BACKEND_URL}/api/v1/internal/notifications/pending",
@@ -603,6 +622,16 @@ class BackendAPI:
     async def mark_notification_sent(self, notification_id: int) -> None:
         response = await self.client.post(
             f"{BACKEND_URL}/api/v1/internal/notifications/{notification_id}/sent",
+            headers={"X-Internal-Token": INTERNAL_API_TOKEN},
+        )
+        response.raise_for_status()
+
+    async def mark_notifications_sent(self, notification_ids: list[int]) -> None:
+        if not notification_ids:
+            return
+        response = await self.client.post(
+            f"{BACKEND_URL}/api/v1/internal/notifications/sent-batch",
+            json={"notification_ids": notification_ids},
             headers={"X-Internal-Token": INTERNAL_API_TOKEN},
         )
         response.raise_for_status()
@@ -898,13 +927,313 @@ class BotRuntime:
     is_primary: bool
     bot: Bot
     dispatcher: Dispatcher
-    task: asyncio.Task[None]
+    polling_task: asyncio.Task[None]
+    notify_task: asyncio.Task[None] | None = None
 
 
 class MultiBotManager:
     def __init__(self, backend: BackendAPI) -> None:
         self.backend = backend
         self.runtimes: dict[int, BotRuntime] = {}
+        self.redis = aioredis.from_url(REDIS_URL, decode_responses=True)
+        self._monitoring_state_cache: dict[int, tuple[bool, datetime]] = {}
+        self._tg_rate_limit_cooldowns: dict[tuple[int, int, int], datetime] = {}
+        self._user_rate_limit_cooldowns: dict[tuple[int, int, int], datetime] = {}
+        self._user_rate_windows: dict[tuple[int, int], deque[datetime]] = {}
+        self._user_drop_until: dict[tuple[int, int], datetime] = {}
+        self._ack_buffers: dict[int, list[int]] = {}
+
+    async def _flush_ack_buffer(self, bot_id: int) -> None:
+        pending_ids = self._ack_buffers.get(bot_id) or []
+        if not pending_ids:
+            return
+        unique_ids = sorted({int(notification_id) for notification_id in pending_ids if int(notification_id) > 0})
+        if not unique_ids:
+            self._ack_buffers[bot_id] = []
+            return
+        chunk_size = 500
+        for idx in range(0, len(unique_ids), chunk_size):
+            chunk = unique_ids[idx : idx + chunk_size]
+            try:
+                await self.backend.mark_notifications_sent(chunk)
+            except Exception as exc:
+                logger.warning("Failed to mark sent in batch bot_id={} size={} error={}", bot_id, len(chunk), exc)
+                return
+        self._ack_buffers[bot_id] = []
+
+    async def _ack_sent(self, bot_id: int, notification_id: int) -> None:
+        if notification_id <= 0:
+            return
+        bucket = self._ack_buffers.setdefault(bot_id, [])
+        bucket.append(int(notification_id))
+        if len(bucket) >= 100:
+            await self._flush_ack_buffer(bot_id)
+
+    async def _ack_sent_many(self, bot_id: int, notification_ids: list[int]) -> None:
+        if not notification_ids:
+            return
+        bucket = self._ack_buffers.setdefault(bot_id, [])
+        for notification_id in notification_ids:
+            if int(notification_id) > 0:
+                bucket.append(int(notification_id))
+        if len(bucket) >= 100:
+            await self._flush_ack_buffer(bot_id)
+
+    async def _purge_monitoring_queue(self, runtime: BotRuntime, telegram_id: int, monitoring_id: int) -> int:
+        if telegram_id <= 0 or monitoring_id <= 0:
+            return 0
+
+        queue_key = redis_queue_key_for_bot(runtime.bot_id)
+        now_ts = int(datetime.now(timezone.utc).timestamp() * 1000)
+        temp_key = f"{queue_key}:purge:{runtime.bot_id}:{telegram_id}:{monitoring_id}:{now_ts}"
+        dropped_ids: list[int] = []
+        scanned = 0
+
+        try:
+            initial_len = int(await self.redis.llen(queue_key))
+            if initial_len <= 0:
+                return 0
+
+            for _ in range(initial_len):
+                raw_payload = await self.redis.lpop(queue_key)
+                if raw_payload is None:
+                    break
+                scanned += 1
+                try:
+                    payload = json.loads(raw_payload)
+                except Exception:
+                    # Corrupted payload should not block queue processing.
+                    continue
+
+                payload_telegram_id = int(payload.get("telegram_id") or 0)
+                payload_monitoring_id = int(payload.get("monitoring_id") or 0)
+                if payload_telegram_id == telegram_id and payload_monitoring_id == monitoring_id:
+                    notification_id = int(payload.get("id") or 0)
+                    if notification_id > 0:
+                        dropped_ids.append(notification_id)
+                    continue
+
+                await self.redis.rpush(temp_key, raw_payload)
+
+            while True:
+                moved = await self.redis.rpoplpush(temp_key, queue_key)
+                if moved is None:
+                    break
+        except Exception as exc:
+            logger.warning(
+                "Failed to purge queue for burst bot_id={} monitoring_id={} telegram_id={} error={}",
+                runtime.bot_id,
+                monitoring_id,
+                telegram_id,
+                exc,
+            )
+        finally:
+            with suppress(Exception):
+                await self.redis.delete(temp_key)
+
+        if dropped_ids:
+            await self._ack_sent_many(runtime.bot_id, dropped_ids)
+            logger.warning(
+                "Purged overflow queued notifications bot_id={} monitoring_id={} telegram_id={} dropped={} scanned={}",
+                runtime.bot_id,
+                monitoring_id,
+                telegram_id,
+                len(dropped_ids),
+                scanned,
+            )
+        return len(dropped_ids)
+
+    async def _is_monitoring_active(self, monitoring_id: int) -> bool:
+        if monitoring_id <= 0:
+            return True
+
+        now = datetime.now(timezone.utc)
+        cached = self._monitoring_state_cache.get(monitoring_id)
+        if cached and now < cached[1]:
+            return cached[0]
+
+        status_code, payload = await self.backend.monitoring_state(monitoring_id)
+        is_active = bool(status_code == 200 and payload.get("is_active"))
+        ttl = max(0.2, MONITORING_STATE_CACHE_SEC)
+        self._monitoring_state_cache[monitoring_id] = (is_active, now + timedelta(seconds=ttl))
+        return is_active
+
+    async def _consume_user_rate_limit(self, runtime: BotRuntime, payload: dict[str, Any]) -> bool:
+        telegram_id = int(payload.get("telegram_id") or 0)
+        monitoring_id = int(payload.get("monitoring_id") or 0)
+        if telegram_id <= 0 or monitoring_id <= 0:
+            return True
+
+        now = datetime.now(timezone.utc)
+        window_seconds = max(1.0, USER_RATE_LIMIT_WINDOW_SEC)
+        max_messages = max(1, USER_RATE_LIMIT_MAX_MESSAGES)
+        key = (telegram_id, monitoring_id)
+
+        drop_until = self._user_drop_until.get(key)
+        if drop_until and now >= drop_until:
+            self._user_drop_until.pop(key, None)
+            drop_until = None
+        if drop_until and now < drop_until:
+            return False
+
+        dq = self._user_rate_windows.setdefault(key, deque())
+        cutoff = now - timedelta(seconds=window_seconds)
+        while dq and dq[0] <= cutoff:
+            dq.popleft()
+
+        if len(dq) >= max_messages:
+            self._user_drop_until[key] = now + timedelta(seconds=window_seconds)
+            await _maybe_send_monitoring_burst_warning(runtime, payload, self._user_rate_limit_cooldowns)
+            await self._purge_monitoring_queue(runtime, telegram_id=telegram_id, monitoring_id=monitoring_id)
+            return False
+
+        dq.append(now)
+        return True
+
+    async def _send_notification_payload(self, runtime: BotRuntime, payload: dict[str, Any]) -> bool:
+        try:
+            text = str(payload.get("message") or "").strip()
+            photo_url = str(payload.get("photo_url") or "").strip()
+            if photo_url:
+                try:
+                    if len(text) > 1000:
+                        await _send_photo_with_retry(
+                            bot=runtime.bot,
+                            chat_id=payload["telegram_id"],
+                            photo_url=photo_url,
+                        )
+                        await runtime.bot.send_message(
+                            chat_id=payload["telegram_id"],
+                            text=text,
+                            parse_mode="HTML",
+                            disable_web_page_preview=True,
+                        )
+                    else:
+                        await _send_photo_with_retry(
+                            bot=runtime.bot,
+                            chat_id=payload["telegram_id"],
+                            photo_url=photo_url,
+                            caption=_fit_photo_caption(text),
+                            parse_mode="HTML",
+                        )
+                except Exception as exc:
+                    logger.warning(
+                        "send_photo failed for notification id={} photo_url={}: {}",
+                        payload.get("id"),
+                        photo_url,
+                        exc,
+                    )
+                    await _maybe_send_rate_limit_warning(runtime, payload, exc, self._tg_rate_limit_cooldowns)
+                    sent_with_download = False
+                    downloaded = await _download_photo_bytes(photo_url)
+                    if downloaded:
+                        photo_data, filename = downloaded
+                        try:
+                            if len(text) > 1000:
+                                await _send_downloaded_photo_with_retry(
+                                    bot=runtime.bot,
+                                    chat_id=payload["telegram_id"],
+                                    photo_data=photo_data,
+                                    filename=filename,
+                                )
+                                await runtime.bot.send_message(
+                                    chat_id=payload["telegram_id"],
+                                    text=text,
+                                    parse_mode="HTML",
+                                    disable_web_page_preview=True,
+                                )
+                            else:
+                                await _send_downloaded_photo_with_retry(
+                                    bot=runtime.bot,
+                                    chat_id=payload["telegram_id"],
+                                    photo_data=photo_data,
+                                    filename=filename,
+                                    caption=_fit_photo_caption(text),
+                                    parse_mode="HTML",
+                                )
+                            sent_with_download = True
+                        except Exception as download_exc:
+                            logger.warning(
+                                "send_photo(downloaded) failed for notification id={} photo_url={}: {}",
+                                payload.get("id"),
+                                photo_url,
+                                download_exc,
+                            )
+
+                    if not sent_with_download:
+                        await runtime.bot.send_message(
+                            chat_id=payload["telegram_id"],
+                            text=text,
+                            parse_mode="HTML",
+                            disable_web_page_preview=False,
+                        )
+            else:
+                await runtime.bot.send_message(
+                    chat_id=payload["telegram_id"],
+                    text=text,
+                    parse_mode="HTML",
+                    disable_web_page_preview=False,
+                )
+            return True
+        except Exception as exc:
+            await _maybe_send_rate_limit_warning(runtime, payload, exc, self._tg_rate_limit_cooldowns)
+            logger.warning("Failed to deliver notification id={}: {}", payload.get("id"), exc)
+            return False
+
+    async def _notification_worker(self, runtime: BotRuntime) -> None:
+        queue_key = redis_queue_key_for_bot(runtime.bot_id)
+        logger.info("Started redis notification worker for bot_id={} queue={}", runtime.bot_id, queue_key)
+        try:
+            while True:
+                item = await self.redis.blpop(queue_key, timeout=1)
+                if item is None:
+                    await self._flush_ack_buffer(runtime.bot_id)
+                    continue
+
+                _, raw_payload = item
+                try:
+                    payload = json.loads(raw_payload)
+                except Exception:
+                    continue
+
+                notification_id = int(payload.get("id") or 0)
+                monitoring_id = int(payload.get("monitoring_id") or 0)
+                payload["bot_id"] = int(payload.get("bot_id") or runtime.bot_id)
+
+                if monitoring_id > 0:
+                    try:
+                        is_active = await self._is_monitoring_active(monitoring_id)
+                    except Exception as exc:
+                        logger.warning("Failed to check monitoring state id={} error={}", monitoring_id, exc)
+                        is_active = True
+                    if not is_active:
+                        await self._ack_sent(runtime.bot_id, notification_id)
+                        continue
+
+                allowed = await self._consume_user_rate_limit(runtime, payload)
+                if not allowed:
+                    await self._ack_sent(runtime.bot_id, notification_id)
+                    continue
+
+                sent = await self._send_notification_payload(runtime, payload)
+                if sent:
+                    await self._ack_sent(runtime.bot_id, notification_id)
+                    continue
+
+                attempt = int(payload.get("_attempt") or 0) + 1
+                if attempt <= 3:
+                    payload["_attempt"] = attempt
+                    try:
+                        await self.redis.rpush(queue_key, json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+                    except Exception as exc:
+                        logger.warning("Failed to requeue notification id={} bot_id={} error={}", notification_id, runtime.bot_id, exc)
+                else:
+                    await self._ack_sent(runtime.bot_id, notification_id)
+        except asyncio.CancelledError:
+            raise
+        finally:
+            await self._flush_ack_buffer(runtime.bot_id)
+            logger.info("Stopped redis notification worker for bot_id={}", runtime.bot_id)
 
     async def start_bot(self, config: dict[str, Any]) -> None:
         bot_id = int(config["id"])
@@ -941,15 +1270,18 @@ class MultiBotManager:
 
         dispatcher = Dispatcher()
         dispatcher.include_router(build_router(bot_id=bot_id, backend=self.backend, is_primary=is_primary))
-        task = asyncio.create_task(dispatcher.start_polling(bot))
-        self.runtimes[bot_id] = BotRuntime(
+        polling_task = asyncio.create_task(dispatcher.start_polling(bot))
+        runtime = BotRuntime(
             bot_id=bot_id,
             token=token,
             is_primary=is_primary,
             bot=bot,
             dispatcher=dispatcher,
-            task=task,
+            polling_task=polling_task,
+            notify_task=None,
         )
+        runtime.notify_task = asyncio.create_task(self._notification_worker(runtime))
+        self.runtimes[bot_id] = runtime
         logger.info(f"Started polling for bot #{bot_id} (@{me.username or 'unknown'})")
 
     async def stop_bot(self, bot_id: int) -> None:
@@ -958,9 +1290,14 @@ class MultiBotManager:
             return
         with suppress(Exception):
             await runtime.dispatcher.stop_polling()
-        runtime.task.cancel()
+        if runtime.notify_task:
+            runtime.notify_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await runtime.notify_task
+        runtime.polling_task.cancel()
         with suppress(asyncio.CancelledError):
-            await runtime.task
+            await runtime.polling_task
+        await self._flush_ack_buffer(bot_id)
         await runtime.bot.session.close()
         logger.info(f"Stopped bot #{bot_id}")
 
@@ -988,7 +1325,9 @@ class MultiBotManager:
 
             new_token = str(incoming[bot_id].get("bot_token", "")).strip()
             new_is_primary = bool(incoming[bot_id].get("is_primary", False))
-            if runtime.task.done() or runtime.token != new_token or runtime.is_primary != new_is_primary:
+            polling_done = runtime.polling_task.done()
+            notify_done = runtime.notify_task.done() if runtime.notify_task else False
+            if polling_done or notify_done or runtime.token != new_token or runtime.is_primary != new_is_primary:
                 await self.stop_bot(bot_id)
 
         for bot_id, cfg in incoming.items():
@@ -998,6 +1337,7 @@ class MultiBotManager:
     async def close(self) -> None:
         for bot_id in list(self.runtimes.keys()):
             await self.stop_bot(bot_id)
+        await self.redis.aclose()
 
 
 async def bots_sync_loop(manager: MultiBotManager, stop_event: asyncio.Event) -> None:
@@ -1006,209 +1346,20 @@ async def bots_sync_loop(manager: MultiBotManager, stop_event: asyncio.Event) ->
         await asyncio.sleep(BOTS_REFRESH_SEC)
 
 
-async def notifications_loop(manager: MultiBotManager, backend: BackendAPI, stop_event: asyncio.Event) -> None:
-    rate_limit_cooldowns: dict[tuple[int, int, int], datetime] = {}
-    burst_warning_cooldowns: dict[tuple[int, int, int], datetime] = {}
-    monitoring_recent_sent: dict[int, deque[datetime]] = {}
-    send_semaphore = asyncio.Semaphore(max(1, NOTIFY_SEND_CONCURRENCY))
-
-    async def deliver_notification(notification: dict[str, Any]) -> None:
-        bot_id = int(notification.get("bot_id") or 0)
-        runtime = manager.runtimes.get(bot_id)
-        if not runtime:
-            return
-
-        async with send_semaphore:
-            try:
-                text = str(notification.get("message") or "").strip()
-                photo_url = str(notification.get("photo_url") or "").strip()
-                if photo_url:
-                    try:
-                        if len(text) > 1000:
-                            await _send_photo_with_retry(
-                                bot=runtime.bot,
-                                chat_id=notification["telegram_id"],
-                                photo_url=photo_url,
-                            )
-                            await runtime.bot.send_message(
-                                chat_id=notification["telegram_id"],
-                                text=text,
-                                parse_mode="HTML",
-                                disable_web_page_preview=True,
-                            )
-                        else:
-                            await _send_photo_with_retry(
-                                bot=runtime.bot,
-                                chat_id=notification["telegram_id"],
-                                photo_url=photo_url,
-                                caption=_fit_photo_caption(text),
-                                parse_mode="HTML",
-                            )
-                    except Exception as exc:
-                        logger.warning(
-                            "send_photo failed for notification id={} photo_url={}: {}",
-                            notification.get("id"),
-                            photo_url,
-                            exc,
-                        )
-                        await _maybe_send_rate_limit_warning(runtime, notification, exc, rate_limit_cooldowns)
-                        sent_with_download = False
-                        downloaded = await _download_photo_bytes(photo_url)
-                        if downloaded:
-                            photo_data, filename = downloaded
-                            try:
-                                if len(text) > 1000:
-                                    await _send_downloaded_photo_with_retry(
-                                        bot=runtime.bot,
-                                        chat_id=notification["telegram_id"],
-                                        photo_data=photo_data,
-                                        filename=filename,
-                                    )
-                                    await runtime.bot.send_message(
-                                        chat_id=notification["telegram_id"],
-                                        text=text,
-                                        parse_mode="HTML",
-                                        disable_web_page_preview=True,
-                                    )
-                                else:
-                                    await _send_downloaded_photo_with_retry(
-                                        bot=runtime.bot,
-                                        chat_id=notification["telegram_id"],
-                                        photo_data=photo_data,
-                                        filename=filename,
-                                        caption=_fit_photo_caption(text),
-                                        parse_mode="HTML",
-                                    )
-                                sent_with_download = True
-                            except Exception as download_exc:
-                                logger.warning(
-                                    "send_photo(downloaded) failed for notification id={} photo_url={}: {}",
-                                    notification.get("id"),
-                                    photo_url,
-                                    download_exc,
-                                )
-
-                        if not sent_with_download:
-                            await runtime.bot.send_message(
-                                chat_id=notification["telegram_id"],
-                                text=text,
-                                parse_mode="HTML",
-                                disable_web_page_preview=False,
-                            )
-                else:
-                    await runtime.bot.send_message(
-                        chat_id=notification["telegram_id"],
-                        text=text,
-                        parse_mode="HTML",
-                        disable_web_page_preview=False,
-                    )
-                await backend.mark_notification_sent(notification["id"])
-            except Exception as exc:
-                await _maybe_send_rate_limit_warning(runtime, notification, exc, rate_limit_cooldowns)
-                logger.warning(f"Failed to deliver notification id={notification.get('id')}: {exc}")
-
-    while not stop_event.is_set():
-        had_notifications = False
-        now = datetime.now(timezone.utc)
-        stale_keys = [key for key, expires_at in rate_limit_cooldowns.items() if expires_at <= now]
-        for key in stale_keys:
-            rate_limit_cooldowns.pop(key, None)
-        stale_burst_keys = [key for key, expires_at in burst_warning_cooldowns.items() if expires_at <= now]
-        for key in stale_burst_keys:
-            burst_warning_cooldowns.pop(key, None)
-
-        window_cutoff = now - timedelta(seconds=max(1.0, MONITORING_BURST_WINDOW_SEC))
-        for monitoring_id in list(monitoring_recent_sent.keys()):
-            bucket = monitoring_recent_sent.get(monitoring_id)
-            if not bucket:
-                monitoring_recent_sent.pop(monitoring_id, None)
-                continue
-            while bucket and bucket[0] <= window_cutoff:
-                bucket.popleft()
-            if not bucket:
-                monitoring_recent_sent.pop(monitoring_id, None)
-
-        try:
-            notifications = await backend.pending_notifications(limit=max(1, min(NOTIFY_FETCH_LIMIT, 500)))
-            had_notifications = bool(notifications)
-            if notifications:
-                allowed_notifications: list[dict[str, Any]] = []
-                dropped_notifications = 0
-
-                for notification in notifications:
-                    bot_id = int(notification.get("bot_id") or 0)
-                    runtime = manager.runtimes.get(bot_id)
-                    if not runtime:
-                        allowed_notifications.append(notification)
-                        continue
-
-                    monitoring_id = int(notification.get("monitoring_id") or 0)
-                    if (
-                        monitoring_id <= 0
-                        or MONITORING_BURST_MAX_MESSAGES <= 0
-                        or MONITORING_BURST_WINDOW_SEC <= 0
-                    ):
-                        allowed_notifications.append(notification)
-                        continue
-
-                    bucket = monitoring_recent_sent.setdefault(monitoring_id, deque())
-                    cutoff = datetime.now(timezone.utc) - timedelta(seconds=max(1.0, MONITORING_BURST_WINDOW_SEC))
-                    while bucket and bucket[0] <= cutoff:
-                        bucket.popleft()
-
-                    if len(bucket) >= MONITORING_BURST_MAX_MESSAGES:
-                        dropped_notifications += 1
-                        try:
-                            await backend.mark_notification_sent(notification["id"])
-                        except Exception as mark_exc:
-                            logger.warning(
-                                "Failed to drop notification id={} for monitoring={} by burst limiter: {}",
-                                notification.get("id"),
-                                monitoring_id,
-                                mark_exc,
-                            )
-                            continue
-                        await _maybe_send_monitoring_burst_warning(runtime, notification, burst_warning_cooldowns)
-                        continue
-
-                    bucket.append(datetime.now(timezone.utc))
-                    allowed_notifications.append(notification)
-
-                if dropped_notifications:
-                    logger.warning(
-                        "Burst limiter dropped {} notifications in this cycle (window={}s max={})",
-                        dropped_notifications,
-                        MONITORING_BURST_WINDOW_SEC,
-                        MONITORING_BURST_MAX_MESSAGES,
-                    )
-
-                if allowed_notifications:
-                    await asyncio.gather(*(deliver_notification(notification) for notification in allowed_notifications))
-        except Exception as exc:
-            logger.error(f"Notifications loop failed: {exc}")
-
-        sleep_for = NOTIFY_BACKLOG_POLL_SEC if had_notifications else NOTIFY_POLL_SEC
-        await asyncio.sleep(max(0.05, sleep_for))
-
-
 async def main() -> None:
     backend = BackendAPI()
     manager = MultiBotManager(backend=backend)
     stop_event = asyncio.Event()
 
     sync_task = asyncio.create_task(bots_sync_loop(manager=manager, stop_event=stop_event))
-    notify_task = asyncio.create_task(notifications_loop(manager=manager, backend=backend, stop_event=stop_event))
 
     try:
-        await asyncio.gather(sync_task, notify_task)
+        await asyncio.gather(sync_task)
     finally:
         stop_event.set()
         sync_task.cancel()
-        notify_task.cancel()
         with suppress(asyncio.CancelledError):
             await sync_task
-        with suppress(asyncio.CancelledError):
-            await notify_task
         await manager.close()
         await backend.close()
 

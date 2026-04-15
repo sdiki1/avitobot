@@ -1,7 +1,7 @@
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -13,6 +13,7 @@ from app.schemas import (
     InternalBotLookupResponse,
     InternalBotSyncRequest,
     InternalNotificationResponse,
+    InternalNotificationsSentBatchRequest,
     InternalProxyBlockedRequest,
     InternalScanPayload,
 )
@@ -27,6 +28,7 @@ from app.services.helpers import (
     normalize_proxy_url,
     now_utc,
 )
+from app.services.notification_queue import enqueue_notification
 
 router = APIRouter(prefix="/internal", tags=["internal"], dependencies=[Depends(require_internal_token)])
 
@@ -208,10 +210,21 @@ def save_scan_result(monitoring_id: int, payload: InternalScanPayload, db: Sessi
     monitoring = db.get(Monitoring, monitoring_id)
     if not monitoring:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Monitoring not found")
+    if not monitoring.is_active:
+        monitoring.last_checked_at = now_utc()
+        db.commit()
+        return {"ok": True, "created_items": 0, "updated_items": 0, "price_changes": 0, "enqueued": 0}
+
+    user = db.get(User, monitoring.user_id)
+    if not user or monitoring.bot_id is None:
+        monitoring.last_checked_at = now_utc()
+        db.commit()
+        return {"ok": True, "created_items": 0, "updated_items": 0, "price_changes": 0, "enqueued": 0}
 
     created = 0
     touched = 0
     price_changes = 0
+    queue_payloads: list[dict] = []
     for item in payload.items:
         existing = db.scalar(
             select(MonitoringItem).where(
@@ -259,6 +272,18 @@ def save_scan_result(monitoring_id: int, payload: InternalScanPayload, db: Sessi
                     status="pending",
                 )
                 db.add(notification)
+                db.flush()
+                queue_payloads.append(
+                    {
+                        "id": notification.id,
+                        "telegram_id": user.telegram_id,
+                        "bot_id": monitoring.bot_id,
+                        "monitoring_id": monitoring.id,
+                        "monitoring_url": normalize_monitoring_url(monitoring.url),
+                        "message": notification.message,
+                        "photo_url": extract_item_photo_url(existing.raw_json) if monitoring.include_photo else None,
+                    }
+                )
                 price_changes += 1
 
             touched += 1
@@ -296,11 +321,35 @@ def save_scan_result(monitoring_id: int, payload: InternalScanPayload, db: Sessi
             status="pending",
         )
         db.add(notification)
+        db.flush()
+        queue_payloads.append(
+            {
+                "id": notification.id,
+                "telegram_id": user.telegram_id,
+                "bot_id": monitoring.bot_id,
+                "monitoring_id": monitoring.id,
+                "monitoring_url": normalize_monitoring_url(monitoring.url),
+                "message": notification.message,
+                "photo_url": extract_item_photo_url(db_item.raw_json) if monitoring.include_photo else None,
+            }
+        )
         created += 1
 
     monitoring.last_checked_at = now_utc()
     db.commit()
-    return {"ok": True, "created_items": created, "updated_items": touched, "price_changes": price_changes}
+
+    enqueued = 0
+    for payload_item in queue_payloads:
+        if enqueue_notification(int(monitoring.bot_id), payload_item):
+            enqueued += 1
+
+    return {
+        "ok": True,
+        "created_items": created,
+        "updated_items": touched,
+        "price_changes": price_changes,
+        "enqueued": enqueued,
+    }
 
 
 @router.get("/bot-monitoring/current", response_model=InternalBotLookupResponse)
@@ -311,6 +360,21 @@ def bot_current_monitoring(
 ) -> InternalBotLookupResponse:
     monitoring = _resolve_user_monitoring(db, telegram_id=telegram_id, bot_id=bot_id)
     return _to_bot_lookup_schema(monitoring)
+
+
+@router.get("/monitorings/{monitoring_id}/state")
+def monitoring_state(monitoring_id: int, db: Session = Depends(get_db)) -> dict:
+    monitoring = db.get(Monitoring, monitoring_id)
+    if not monitoring:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Monitoring not found")
+    user = db.get(User, monitoring.user_id)
+    return {
+        "monitoring_id": monitoring.id,
+        "is_active": bool(monitoring.is_active),
+        "link_configured": bool(monitoring.link_configured),
+        "telegram_id": user.telegram_id if user else None,
+        "bot_id": monitoring.bot_id,
+    }
 
 
 @router.post("/bot-monitoring/start", response_model=InternalBotLookupResponse)
@@ -396,3 +460,22 @@ def mark_sent(notification_id: int, db: Session = Depends(get_db)) -> dict:
     notification.sent_at = now_utc()
     db.commit()
     return {"ok": True}
+
+
+@router.post("/notifications/sent-batch")
+def mark_sent_batch(payload: InternalNotificationsSentBatchRequest, db: Session = Depends(get_db)) -> dict:
+    ids = sorted({int(notification_id) for notification_id in (payload.notification_ids or []) if int(notification_id) > 0})
+    if not ids:
+        return {"ok": True, "updated": 0}
+
+    sent_at = now_utc()
+    result = db.execute(
+        update(Notification)
+        .where(Notification.id.in_(ids))
+        .values(
+            status="sent",
+            sent_at=sent_at,
+        )
+    )
+    db.commit()
+    return {"ok": True, "updated": int(result.rowcount or 0)}
