@@ -9,25 +9,18 @@ from app.services.helpers import DEFAULT_TRIAL_DAYS, MINIAPP_CONTENT_DEFAULTS, T
 
 DEFAULT_PLANS = [
     {
-        "name": "1 ссылка / 7 дней",
-        "description": "Мониторинг 1 ссылки на 7 дней",
-        "links_limit": 1,
-        "duration_days": 7,
-        "price_rub": 100,
-    },
-    {
-        "name": "1 ссылка / 30 дней",
-        "description": "Мониторинг 1 ссылки на 30 дней",
+        "name": "Стандартная",
+        "description": "Стандартная подписка",
         "links_limit": 1,
         "duration_days": 30,
         "price_rub": 500,
     },
     {
-        "name": "3 ссылки / 7 дней",
-        "description": "Мониторинг до 3 ссылок на 7 дней",
-        "links_limit": 3,
-        "duration_days": 7,
-        "price_rub": 250,
+        "name": "Скоростная",
+        "description": "Скоростная подписка",
+        "links_limit": 1,
+        "duration_days": 30,
+        "price_rub": 500,
     },
 ]
 
@@ -37,12 +30,18 @@ def init_db() -> None:
     with engine.begin() as conn:
         conn.exec_driver_sql("ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_code VARCHAR(64)")
         conn.exec_driver_sql("ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_balance_rub INTEGER DEFAULT 0")
+        conn.exec_driver_sql("ALTER TABLE users ADD COLUMN IF NOT EXISTS referred_by_user_id INTEGER")
+        conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_users_referred_by_user_id ON users (referred_by_user_id)")
         conn.exec_driver_sql("CREATE UNIQUE INDEX IF NOT EXISTS uq_users_referral_code ON users (referral_code)")
         conn.exec_driver_sql("UPDATE users SET referral_code = 'ref_' || telegram_id::text WHERE referral_code IS NULL")
         conn.exec_driver_sql("UPDATE users SET referral_balance_rub = 0 WHERE referral_balance_rub IS NULL")
 
         conn.exec_driver_sql("ALTER TABLE monitorings ADD COLUMN IF NOT EXISTS bot_id INTEGER")
         conn.exec_driver_sql("ALTER TABLE monitorings ADD COLUMN IF NOT EXISTS link_configured BOOLEAN DEFAULT FALSE")
+        conn.exec_driver_sql("ALTER TABLE monitorings ADD COLUMN IF NOT EXISTS include_photo BOOLEAN DEFAULT TRUE")
+        conn.exec_driver_sql("ALTER TABLE monitorings ADD COLUMN IF NOT EXISTS include_description BOOLEAN DEFAULT TRUE")
+        conn.exec_driver_sql("ALTER TABLE monitorings ADD COLUMN IF NOT EXISTS include_seller_info BOOLEAN DEFAULT TRUE")
+        conn.exec_driver_sql("ALTER TABLE monitorings ADD COLUMN IF NOT EXISTS notify_price_drop BOOLEAN DEFAULT TRUE")
         conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_monitorings_bot_id ON monitorings (bot_id)")
         conn.exec_driver_sql(
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_monitorings_user_bot "
@@ -53,6 +52,10 @@ def init_db() -> None:
             "WHERE link_configured IS NOT TRUE AND NULLIF(TRIM(url), '') IS NOT NULL"
         )
         conn.exec_driver_sql("UPDATE monitorings SET link_configured = FALSE WHERE link_configured IS NULL")
+        conn.exec_driver_sql("UPDATE monitorings SET include_photo = TRUE WHERE include_photo IS NULL")
+        conn.exec_driver_sql("UPDATE monitorings SET include_description = TRUE WHERE include_description IS NULL")
+        conn.exec_driver_sql("UPDATE monitorings SET include_seller_info = TRUE WHERE include_seller_info IS NULL")
+        conn.exec_driver_sql("UPDATE monitorings SET notify_price_drop = TRUE WHERE notify_price_drop IS NULL")
 
         conn.exec_driver_sql("ALTER TABLE telegram_bots ADD COLUMN IF NOT EXISTS is_primary BOOLEAN DEFAULT FALSE")
         conn.exec_driver_sql("UPDATE telegram_bots SET is_primary = FALSE WHERE is_primary IS NULL")

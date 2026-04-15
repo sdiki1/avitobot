@@ -7,6 +7,7 @@ class TelegramAuthRequest(BaseModel):
     telegram_id: int
     username: str | None = None
     full_name: str | None = None
+    referral_code: str | None = None
 
 
 class MiniAppSignInRequest(BaseModel):
@@ -106,6 +107,21 @@ class MonitoringCreate(BaseModel):
     min_price: int | None = None
     max_price: int | None = None
     geo: str | None = None
+    include_photo: bool = True
+    include_description: bool = True
+    include_seller_info: bool = True
+    notify_price_drop: bool = True
+
+
+class MonitoringUpdate(BaseModel):
+    telegram_id: int
+    url: str | None = None
+    title: str | None = None
+    is_active: bool | None = None
+    include_photo: bool | None = None
+    include_description: bool | None = None
+    include_seller_info: bool | None = None
+    notify_price_drop: bool | None = None
 
 
 class MonitoringPurchaseRequest(BaseModel):
@@ -125,6 +141,10 @@ class MonitoringResponse(BaseModel):
     geo: str | None = None
     is_active: bool
     link_configured: bool
+    include_photo: bool = True
+    include_description: bool = True
+    include_seller_info: bool = True
+    notify_price_drop: bool = True
     last_checked_at: datetime | None = None
     bot: BotReference | None = None
 
@@ -197,6 +217,12 @@ class ActivateSubscriptionRequest(BaseModel):
 class PurchaseSubscriptionRequest(BaseModel):
     telegram_id: int
     plan_id: int
+    duration_days: int | None = Field(default=None, gt=0)
+    subscription_type: str = "standard"
+    use_referral_balance: bool = False
+    monitoring_id: int | None = None
+    monitoring_title: str | None = None
+    monitoring_url: str | None = None
 
 
 class PurchaseSubscriptionResponse(BaseModel):
@@ -206,6 +232,9 @@ class PurchaseSubscriptionResponse(BaseModel):
     plan_id: int
     ends_at: datetime
     is_trial: bool = False
+    amount_rub: int = 0
+    referral_used_rub: int = 0
+    total_price_rub: int = 0
 
 
 class OnboardingTrialRequest(BaseModel):
@@ -329,3 +358,13 @@ class InternalProxyBlockedRequest(BaseModel):
     proxy_url: str
     status_code: int
     source_url: str | None = None
+
+
+class MonitoringAdminUpdate(BaseModel):
+    title: str | None = None
+    url: str | None = None
+    is_active: bool | None = None
+    include_photo: bool | None = None
+    include_description: bool | None = None
+    include_seller_info: bool | None = None
+    notify_price_drop: bool | None = None

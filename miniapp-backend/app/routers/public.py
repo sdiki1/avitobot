@@ -9,6 +9,7 @@ from app.schemas import (
     MiniAppContentResponse,
     MiniAppSignInRequest,
     MonitoringCreate,
+    MonitoringUpdate,
     MonitoringItemResponse,
     MonitoringPurchaseRequest,
     MonitoringResponse,
@@ -24,15 +25,18 @@ from app.schemas import (
 )
 from app.services.helpers import (
     activate_user_subscription,
+    apply_referral_code,
     ensure_subscription_monitoring_slots,
     ensure_user_referral_code,
     get_miniapp_content_settings,
     get_active_subscription_query,
     get_available_bot_for_user,
+    get_speed_surcharge_rub,
     get_or_create_user,
-    get_trial_days,
     normalize_monitoring_url,
     parse_miniapp_auth_token,
+    reward_referrer_for_payment,
+    send_admin_event_message,
     send_subscription_assigned_bot_message,
 )
 from app.services.miniapp_auth import (
@@ -45,7 +49,7 @@ from app.services.miniapp_auth import (
 )
 
 router = APIRouter(prefix="/public", tags=["public"])
-ONBOARDING_TRIAL_DAYS = 2
+ONBOARDING_TRIAL_DAYS = 1
 
 
 def _build_bot_link(username: str | None) -> str | None:
@@ -77,6 +81,10 @@ def _monitoring_to_schema(mon: Monitoring) -> MonitoringResponse:
         geo=mon.geo,
         is_active=mon.is_active,
         link_configured=mon.link_configured,
+        include_photo=mon.include_photo,
+        include_description=mon.include_description,
+        include_seller_info=mon.include_seller_info,
+        notify_price_drop=mon.notify_price_drop,
         last_checked_at=mon.last_checked_at,
         bot=_to_bot_ref(mon.bot),
     )
@@ -105,6 +113,11 @@ def _miniapp_content_response(values: dict[str, str]) -> MiniAppContentResponse:
             {"key": "privacy", "title": values["miniapp_info_privacy_title"], "url": values["miniapp_info_privacy_url"]},
         ],
     )
+
+
+def _is_miniapp_plan_name(name: str | None) -> bool:
+    normalized = (name or "").strip().lower()
+    return normalized.startswith("стандарт") or normalized.startswith("скорост")
 
 
 def _require_active_subscription(db: Session, user_id: int) -> UserSubscription:
@@ -177,7 +190,7 @@ def _activate_onboarding_trial(db: Session, user: User) -> UserSubscription | No
             plan_id=plan.id,
             amount_rub=0,
             status="completed",
-            provider="onboarding_trial",
+            provider="trial_manual",
         )
     )
     subscription = activate_user_subscription(
@@ -191,18 +204,38 @@ def _activate_onboarding_trial(db: Session, user: User) -> UserSubscription | No
     current_total_slots = db.scalar(select(func.count(Monitoring.id)).where(Monitoring.user_id == user.id)) or 0
     ensure_subscription_monitoring_slots(db, user.id, current_total_slots + 1)
     send_subscription_assigned_bot_message(db, user)
+    send_admin_event_message(
+        db,
+        (
+            "🧪 Активирован пробный период\n"
+            f"Пользователь: {user.telegram_id}\n"
+            f"Срок: {ONBOARDING_TRIAL_DAYS} дн."
+        ),
+    )
     return subscription
 
 
 @router.post("/auth/telegram", response_model=UserResponse)
 def telegram_auth(payload: TelegramAuthRequest, db: Session = Depends(get_db)) -> User:
+    existed_before = db.scalar(select(User.id).where(User.telegram_id == payload.telegram_id)) is not None
     user = get_or_create_user(
         db,
         telegram_id=payload.telegram_id,
         username=payload.username,
         full_name=payload.full_name,
     )
+    apply_referral_code(db, user, payload.referral_code)
     user = ensure_user_referral_code(db, user)
+    if not existed_before:
+        username_line = f"@{user.username}" if user.username else "—"
+        send_admin_event_message(
+            db,
+            (
+                "👤 Новый пользователь в боте\n"
+                f"Telegram ID: {user.telegram_id}\n"
+                f"Username: {username_line}"
+            ),
+        )
     return user
 
 
@@ -275,7 +308,9 @@ def onboarding_trial(
 
 @router.get("/plans", response_model=list[TariffPlanResponse])
 def list_plans(db: Session = Depends(get_db)) -> list[TariffPlan]:
-    return list(db.scalars(select(TariffPlan).where(TariffPlan.is_active.is_(True)).order_by(TariffPlan.price_rub.asc())))
+    plans = list(db.scalars(select(TariffPlan).where(TariffPlan.is_active.is_(True)).order_by(TariffPlan.price_rub.asc())))
+    only_miniapp = [plan for plan in plans if _is_miniapp_plan_name(plan.name)]
+    return only_miniapp or plans
 
 
 @router.get("/miniapp-content", response_model=MiniAppContentResponse)
@@ -293,10 +328,19 @@ def profile(
     assert_telegram_id_match(auth_user, telegram_id)
     user = ensure_user_referral_code(db, auth_user)
     subscription = db.scalar(get_active_subscription_query(user.id))
+    subscriptions = db.scalars(
+        select(UserSubscription)
+        .where(UserSubscription.user_id == user.id)
+        .order_by(UserSubscription.created_at.desc())
+        .limit(50)
+    ).all()
     monitorings_total = db.scalar(select(func.count(Monitoring.id)).where(Monitoring.user_id == user.id))
     active_monitorings = db.scalar(
         select(func.count(Monitoring.id)).where(and_(Monitoring.user_id == user.id, Monitoring.is_active.is_(True)))
     )
+    user_monitorings = db.scalars(
+        select(Monitoring).where(Monitoring.user_id == user.id).order_by(Monitoring.id.asc())
+    ).all()
     referral_bot = db.scalar(
         select(TelegramBot)
         .where(
@@ -326,6 +370,9 @@ def profile(
         "total_monitorings": monitorings_total or 0,
         "referral_link": referral_link,
         "subscription": None,
+        "subscriptions": [],
+        "can_activate_trial": len(subscriptions) == 0,
+        "assigned_bots": [],
     }
     if subscription:
         payload["subscription"] = {
@@ -337,6 +384,36 @@ def profile(
             "links_limit": subscription.plan.links_limit if subscription.plan else 0,
             "plan_name": subscription.plan.name if subscription.plan else "Без тарифа",
         }
+
+    payload["subscriptions"] = [
+        {
+            "id": sub.id,
+            "plan_id": sub.plan_id,
+            "plan_name": sub.plan.name if sub.plan else "Без тарифа",
+            "status": sub.status,
+            "is_trial": sub.is_trial,
+            "amount_paid": sub.amount_paid,
+            "links_limit": sub.plan.links_limit if sub.plan else 0,
+            "started_at": sub.started_at,
+            "ends_at": sub.ends_at,
+            "created_at": sub.created_at,
+        }
+        for sub in subscriptions
+    ]
+
+    bots: dict[int, dict] = {}
+    for mon in user_monitorings:
+        if not mon.bot:
+            continue
+        if mon.bot.id in bots:
+            continue
+        bots[mon.bot.id] = {
+            "id": mon.bot.id,
+            "name": mon.bot.name,
+            "bot_username": mon.bot.bot_username,
+            "bot_link": _build_bot_link(mon.bot.bot_username),
+        }
+    payload["assigned_bots"] = list(bots.values())
     return payload
 
 
@@ -386,8 +463,56 @@ def create_monitoring(
         geo=payload.geo,
         is_active=True,
         link_configured=True,
+        include_photo=payload.include_photo,
+        include_description=payload.include_description,
+        include_seller_info=payload.include_seller_info,
+        notify_price_drop=payload.notify_price_drop,
     )
     db.add(monitoring)
+    db.commit()
+    db.refresh(monitoring)
+    return _monitoring_to_schema(monitoring)
+
+
+@router.patch("/monitorings/{monitoring_id}", response_model=MonitoringResponse)
+def update_monitoring(
+    monitoring_id: int,
+    payload: MonitoringUpdate,
+    auth_user: User = Depends(require_miniapp_user),
+    db: Session = Depends(get_db),
+) -> MonitoringResponse:
+    assert_telegram_id_match(auth_user, payload.telegram_id)
+    monitoring = db.scalar(
+        select(Monitoring).where(and_(Monitoring.id == monitoring_id, Monitoring.user_id == auth_user.id))
+    )
+    if not monitoring:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Monitoring not found")
+
+    if payload.title is not None:
+        monitoring.title = payload.title.strip() or monitoring.title
+
+    if payload.url is not None:
+        cleaned_url = normalize_monitoring_url(payload.url)
+        monitoring.url = cleaned_url
+        monitoring.link_configured = bool(cleaned_url)
+
+    if payload.is_active is not None:
+        if payload.is_active and not monitoring.link_configured:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Сначала задайте ссылку, затем включайте мониторинг",
+            )
+        monitoring.is_active = payload.is_active
+
+    if payload.include_photo is not None:
+        monitoring.include_photo = payload.include_photo
+    if payload.include_description is not None:
+        monitoring.include_description = payload.include_description
+    if payload.include_seller_info is not None:
+        monitoring.include_seller_info = payload.include_seller_info
+    if payload.notify_price_drop is not None:
+        monitoring.notify_price_drop = payload.notify_price_drop
+
     db.commit()
     db.refresh(monitoring)
     return _monitoring_to_schema(monitoring)
@@ -445,41 +570,117 @@ def purchase_subscription(
     if not plan or not plan.is_active:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="План не найден или неактивен")
 
-    existing_subscriptions = db.scalar(select(func.count(UserSubscription.id)).where(UserSubscription.user_id == user.id)) or 0
-    trial_days = get_trial_days(db)
-    use_trial = trial_days > 0 and existing_subscriptions == 0
+    target_monitoring = None
+    if payload.monitoring_id is not None:
+        target_monitoring = db.scalar(
+            select(Monitoring).where(and_(Monitoring.id == payload.monitoring_id, Monitoring.user_id == user.id))
+        )
+        if not target_monitoring:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Monitoring not found")
 
-    slots_to_add = 1
+    slots_to_add = 0 if target_monitoring else 1
     _require_free_bots_for_new_slots(db, user.id, slots_to_add)
 
     current_total_slots = db.scalar(select(func.count(Monitoring.id)).where(Monitoring.user_id == user.id)) or 0
     target_total_slots = current_total_slots + slots_to_add
 
+    subscription_type = (payload.subscription_type or "standard").strip().lower()
+    if subscription_type not in {"standard", "speed"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Неверный тип подписки")
+
+    selected_duration_days = int(payload.duration_days or plan.duration_days)
+    if selected_duration_days <= 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Некорректный срок подписки")
+
+    base_price = max(0, int(plan.price_rub))
+    speed_surcharge = get_speed_surcharge_rub(selected_duration_days) if subscription_type == "speed" else 0
+    total_price = max(0, base_price + speed_surcharge)
+
+    referral_used = 0
+    if payload.use_referral_balance:
+        current_balance = max(0, int(user.referral_balance_rub or 0))
+        referral_used = min(current_balance, total_price)
+        user.referral_balance_rub = current_balance - referral_used
+
+    amount_to_pay = max(0, total_price - referral_used)
+    provider = "miniapp_speed" if subscription_type == "speed" else "miniapp_standard"
+    if referral_used > 0:
+        provider = f"{provider}_with_ref"
+
     payment = Payment(
         user_id=user.id,
         plan_id=plan.id,
-        amount_rub=0 if use_trial else plan.price_rub,
+        amount_rub=amount_to_pay,
         status="completed",
-        provider="trial" if use_trial else "miniapp",
+        provider=provider,
+        payload={
+            "subscription_type": subscription_type,
+            "duration_days": selected_duration_days,
+            "monitoring_id": target_monitoring.id if target_monitoring else None,
+            "base_price_rub": base_price,
+            "speed_surcharge_rub": speed_surcharge,
+            "total_price_rub": total_price,
+            "referral_used_rub": referral_used,
+            "monitoring_title": payload.monitoring_title,
+            "monitoring_url": payload.monitoring_url,
+        },
     )
     db.add(payment)
     subscription = activate_user_subscription(
         db,
         user.id,
         plan,
-        duration_days_override=trial_days if use_trial else None,
-        amount_paid_override=0 if use_trial else plan.price_rub,
-        is_trial=use_trial,
+        duration_days_override=selected_duration_days,
+        amount_paid_override=amount_to_pay,
+        is_trial=False,
     )
     ensure_subscription_monitoring_slots(db, user.id, target_total_slots)
+    configured_monitoring = target_monitoring
+    if not configured_monitoring:
+        configured_monitoring = db.scalar(
+            select(Monitoring)
+            .where(
+                and_(
+                    Monitoring.user_id == user.id,
+                    Monitoring.link_configured.is_(False),
+                )
+            )
+            .order_by(Monitoring.id.desc())
+        )
+    if configured_monitoring:
+        if payload.monitoring_title and payload.monitoring_title.strip():
+            configured_monitoring.title = payload.monitoring_title.strip()
+        if payload.monitoring_url is not None:
+            cleaned_url = normalize_monitoring_url(payload.monitoring_url)
+            if cleaned_url:
+                configured_monitoring.url = cleaned_url
+                configured_monitoring.link_configured = True
+
+    reward = reward_referrer_for_payment(db, user, amount_to_pay)
+    db.commit()
     send_subscription_assigned_bot_message(db, user)
+    send_admin_event_message(
+        db,
+        (
+            "💳 Покупка подписки\n"
+            f"Пользователь: {user.telegram_id}\n"
+            f"Тариф: {plan.name}\n"
+            f"Тип: {'Скоростная' if subscription_type == 'speed' else 'Стандартная'}\n"
+            f"Сумма: {amount_to_pay} ₽\n"
+            f"Списано с реф. баланса: {referral_used} ₽\n"
+            f"Начислено рефереру: {reward} ₽"
+        ),
+    )
     return PurchaseSubscriptionResponse(
         ok=True,
         subscription_id=subscription.id,
         user_id=user.id,
         plan_id=plan.id,
         ends_at=subscription.ends_at,
-        is_trial=subscription.is_trial,
+        is_trial=False,
+        amount_rub=amount_to_pay,
+        referral_used_rub=referral_used,
+        total_price_rub=total_price,
     )
 
 

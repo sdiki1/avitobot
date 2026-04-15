@@ -173,9 +173,17 @@ def active_monitorings(db: Session = Depends(get_db)) -> list[dict]:
         )
         if not active_subscription:
             continue
+        proxy_pool: list[str] = []
         proxy_url = None
-        if proxies:
-            proxy_url = proxies[mon.id % len(proxies)].proxy_url
+        if active_proxy_urls:
+            first_idx = mon.id % len(active_proxy_urls)
+            proxy_pool.append(active_proxy_urls[first_idx])
+            if len(active_proxy_urls) > 1:
+                second_idx = (first_idx + 1) % len(active_proxy_urls)
+                second_proxy = active_proxy_urls[second_idx]
+                if second_proxy not in proxy_pool:
+                    proxy_pool.append(second_proxy)
+            proxy_url = proxy_pool[0]
 
         payload.append(
             {
@@ -189,7 +197,7 @@ def active_monitorings(db: Session = Depends(get_db)) -> list[dict]:
                 "max_price": mon.max_price,
                 "geo": mon.geo,
                 "proxy_url": proxy_url,
-                "proxy_pool": active_proxy_urls,
+                "proxy_pool": proxy_pool,
             }
         )
     return payload
@@ -216,7 +224,11 @@ def save_scan_result(monitoring_id: int, payload: InternalScanPayload, db: Sessi
         if existing:
             old_price = existing.price_rub
             new_price = item.price_rub
-            price_changed = old_price != new_price
+            price_decreased = (
+                old_price is not None
+                and new_price is not None
+                and new_price < old_price
+            )
 
             existing.title = item.title
             existing.url = item.url
@@ -226,7 +238,7 @@ def save_scan_result(monitoring_id: int, payload: InternalScanPayload, db: Sessi
             existing.raw_json = item.raw_json
             existing.last_seen_at = now_utc()
 
-            if price_changed:
+            if price_decreased and monitoring.notify_price_drop:
                 notification = Notification(
                     user_id=monitoring.user_id,
                     monitoring_id=monitoring_id,
@@ -241,6 +253,8 @@ def save_scan_result(monitoring_id: int, payload: InternalScanPayload, db: Sessi
                         location=existing.location,
                         description=extract_item_description(existing.raw_json),
                         raw_json=existing.raw_json,
+                        include_description=monitoring.include_description,
+                        include_seller_info=monitoring.include_seller_info,
                     ),
                     status="pending",
                 )
@@ -276,6 +290,8 @@ def save_scan_result(monitoring_id: int, payload: InternalScanPayload, db: Sessi
                 location=db_item.location,
                 description=extract_item_description(db_item.raw_json),
                 raw_json=db_item.raw_json,
+                include_description=monitoring.include_description,
+                include_seller_info=monitoring.include_seller_info,
             ),
             status="pending",
         )
@@ -365,7 +381,7 @@ def pending_notifications(
                 monitoring_id=n.monitoring_id,
                 monitoring_url=normalize_monitoring_url(monitoring.url),
                 message=n.message,
-                photo_url=extract_item_photo_url(item.raw_json if item else None),
+                photo_url=extract_item_photo_url(item.raw_json if item else None) if monitoring.include_photo else None,
             )
         )
     return out

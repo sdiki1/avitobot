@@ -21,7 +21,9 @@
 html,
 body,
 #root {
+  width: 100%;
   min-height: 100%;
+  height: 100%;
 }
 
 body {
@@ -41,7 +43,7 @@ a {
 }
 
 .app-root {
-  min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   justify-content: center;
   background: radial-gradient(circle at 50% -20%, rgba(125, 87, 234, 0.18), transparent 52%), var(--bg);
@@ -49,7 +51,7 @@ a {
 
 .mobile-shell {
   width: min(860px, 100vw);
-  min-height: 100vh;
+  min-height: 100dvh;
   position: relative;
   background: var(--bg);
 }
@@ -68,7 +70,7 @@ a {
 }
 
 .screen-block {
-  min-height: calc(100vh - 160px);
+  min-height: calc(100dvh - 160px);
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -456,7 +458,7 @@ a {
   }
 
   .screen-block {
-    min-height: calc(100vh - 150px);
+    min-height: calc(100dvh - 150px);
   }
 }
 

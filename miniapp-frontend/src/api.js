@@ -48,6 +48,11 @@ export async function getMonitorings(telegramId) {
   return data
 }
 
+export async function updateMonitoring(monitoringId, payload) {
+  const { data } = await client.patch(`/monitorings/${monitoringId}`, payload)
+  return data
+}
+
 export async function createMonitoring(payload) {
   const { data } = await client.post('/monitorings', payload)
   return data
@@ -60,6 +65,11 @@ export async function purchaseMonitoring(payload) {
 
 export async function purchaseSubscription(payload) {
   const { data } = await client.post('/subscriptions/purchase', payload)
+  return data
+}
+
+export async function onboardingTrial(payload) {
+  const { data } = await client.post('/onboarding-trial', payload)
   return data
 }
 

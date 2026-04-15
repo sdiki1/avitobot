@@ -151,6 +151,59 @@ def get_or_create_user(db: Session, telegram_id: int, username: str | None, full
     return user
 
 
+def _normalize_referral_code(value: str | None) -> str | None:
+    normalized = (value or "").strip()
+    return normalized or None
+
+
+def apply_referral_code(db: Session, user: User, referral_code: str | None) -> bool:
+    normalized = _normalize_referral_code(referral_code)
+    if not normalized:
+        return False
+    if user.referred_by_user_id is not None:
+        return False
+
+    referrer = db.scalar(select(User).where(User.referral_code == normalized))
+    if not referrer or referrer.id == user.id:
+        return False
+
+    user.referred_by_user_id = referrer.id
+    db.commit()
+    db.refresh(user)
+    return True
+
+
+def get_speed_surcharge_rub(duration_days: int) -> int:
+    days = max(0, int(duration_days))
+    if days <= 7:
+        return max(0, int(settings.speed_surcharge_7_days_rub))
+    if days <= 15:
+        return max(0, int(settings.speed_surcharge_15_days_rub))
+    return max(0, int(settings.speed_surcharge_30_days_rub))
+
+
+def reward_referrer_for_payment(db: Session, paying_user: User, paid_amount_rub: int) -> int:
+    if paid_amount_rub <= 0:
+        return 0
+    if paying_user.referred_by_user_id is None:
+        return 0
+
+    reward_percent = max(0, int(settings.referral_reward_percent))
+    if reward_percent <= 0:
+        return 0
+
+    referrer = db.get(User, int(paying_user.referred_by_user_id))
+    if not referrer:
+        return 0
+
+    reward = int(paid_amount_rub * reward_percent / 100)
+    if reward <= 0:
+        return 0
+
+    referrer.referral_balance_rub = int(referrer.referral_balance_rub or 0) + reward
+    return reward
+
+
 def get_active_subscription_query(user_id: int) -> Select[tuple[UserSubscription]]:
     return select(UserSubscription).where(
         and_(
@@ -334,6 +387,43 @@ def _send_telegram_message(bot_token: str, chat_id: int, text: str) -> bool:
     except Exception as exc:
         logger.warning("Failed to send telegram message: %s", exc)
         return False
+
+
+def get_admin_notify_chat_ids(db: Session) -> list[int]:
+    chat_ids: set[int] = set()
+
+    for raw_id in str(settings.admin_notify_chat_ids or "").split(","):
+        value = raw_id.strip()
+        if not value or not re.fullmatch(r"-?\d+", value):
+            continue
+        chat_ids.add(int(value))
+
+    for admin_telegram_id in db.scalars(select(User.telegram_id).where(User.is_admin.is_(True))).all():
+        if admin_telegram_id:
+            chat_ids.add(int(admin_telegram_id))
+
+    return sorted(chat_ids)
+
+
+def send_admin_event_message(db: Session, text: str) -> int:
+    if not text or not text.strip():
+        return 0
+
+    primary_bot = db.scalar(
+        select(TelegramBot)
+        .where(and_(TelegramBot.is_primary.is_(True), TelegramBot.is_active.is_(True)))
+        .order_by(TelegramBot.id.asc())
+    )
+    if not primary_bot:
+        primary_bot = db.scalar(select(TelegramBot).where(TelegramBot.is_active.is_(True)).order_by(TelegramBot.id.asc()))
+    if not primary_bot:
+        return 0
+
+    sent = 0
+    for chat_id in get_admin_notify_chat_ids(db):
+        if _send_telegram_message(primary_bot.bot_token, chat_id, text):
+            sent += 1
+    return sent
 
 
 def send_subscription_assigned_bot_message(db: Session, user: User) -> bool:
@@ -636,6 +726,8 @@ def format_new_item_message(
     avito_ad_id: str | None = None,
     description: str | None = None,
     raw_json: dict[str, Any] | None = None,
+    include_description: bool = True,
+    include_seller_info: bool = True,
 ) -> str:
     price_line = html.escape(_format_price_line(price_rub))
     location_line = html.escape(location or "Локация не указана")
@@ -646,8 +738,8 @@ def format_new_item_message(
         f"💰 {price_line}\n"
         f"📍 {location_line}\n"
         f"🔗 {item_url}"
-        f"{_build_optional_description_block(description)}"
-        f"{_build_optional_seller_stats_block(raw_json)}"
+        f"{_build_optional_description_block(description) if include_description else ''}"
+        f"{_build_optional_seller_stats_block(raw_json) if include_seller_info else ''}"
         f"{_build_published_at_block(published_at)}"
     )
 
@@ -662,6 +754,8 @@ def format_price_change_message(
     avito_ad_id: str | None = None,
     description: str | None = None,
     raw_json: dict[str, Any] | None = None,
+    include_description: bool = True,
+    include_seller_info: bool = True,
 ) -> str:
     old_line = html.escape(_format_price_line(old_price_rub))
     new_line = html.escape(_format_price_line(new_price_rub))
@@ -675,8 +769,8 @@ def format_price_change_message(
         f"💰 Стало: {new_line}\n"
         f"📍 {location_line}\n"
         f"🔗 {item_url}"
-        f"{_build_optional_description_block(description)}"
-        f"{_build_optional_seller_stats_block(raw_json)}"
+        f"{_build_optional_description_block(description) if include_description else ''}"
+        f"{_build_optional_seller_stats_block(raw_json) if include_seller_info else ''}"
         f"{_build_published_at_block(published_at)}"
     )
 

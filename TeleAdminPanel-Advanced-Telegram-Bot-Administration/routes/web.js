@@ -34,10 +34,10 @@ const MINIAPP_PLAN_DEFINITIONS = [
     key: 'speed',
     name: 'Скоростная',
     defaults: {
-      description: 'Скоростная подписка',
+      description: 'Скоростная подписка (наценка по сроку применяется в miniapp)',
       links_limit: 1,
       duration_days: 30,
-      price_rub: 900,
+      price_rub: 500,
       is_active: true,
     },
   },
@@ -234,9 +234,26 @@ router.get('/users', async (req, res) => {
 router.get('/monitorings', async (req, res) => {
   try {
     const monitorings = await api.getMonitorings();
-    res.render('monitorings', { monitorings, error: null });
+    res.render('monitorings', { monitorings, error: req.query.error || null, success: req.query.success || null });
   } catch (error) {
-    res.render('monitorings', { monitorings: [], error: error.message });
+    res.render('monitorings', { monitorings: [], error: error.message, success: null });
+  }
+});
+
+router.post('/monitorings/:id/update', async (req, res) => {
+  try {
+    await api.updateMonitoring(req.params.id, {
+      title: req.body.title || null,
+      url: req.body.url || '',
+      is_active: req.body.is_active === 'on',
+      include_photo: req.body.include_photo === 'on',
+      include_description: req.body.include_description === 'on',
+      include_seller_info: req.body.include_seller_info === 'on',
+      notify_price_drop: req.body.notify_price_drop === 'on',
+    });
+    res.redirect(withAdminBase('/monitorings?success=Мониторинг+обновлен'));
+  } catch (error) {
+    res.redirect(withAdminBase(`/monitorings?error=${encodeURIComponent(`Ошибка: ${error.message}`)}`));
   }
 });
 

@@ -3,11 +3,13 @@ import {
   getAuthSession,
   getMiniappContent,
   getMonitorings,
+  onboardingTrial,
   getPlans,
   getProfile,
   purchaseSubscription,
   resolveAuthToken,
   signInMiniApp,
+  updateMonitoring,
 } from './api'
 
 const TABS = {
@@ -64,6 +66,12 @@ const DEFAULT_MINIAPP_CONTENT = {
   ],
 }
 
+const SPEED_SURCHARGE_BY_DAYS = {
+  7: 300,
+  15: 500,
+  30: 800,
+}
+
 function getTelegramInitData() {
   const webapp = window.Telegram?.WebApp
   if (!webapp) return null
@@ -96,15 +104,6 @@ function forceTelegramFullscreen() {
 
 function getAuthTokenFromQuery() {
   return new URLSearchParams(window.location.search).get('auth')
-}
-
-function formatRemaining(endsAt) {
-  if (!endsAt) return 'без срока'
-  const diffMs = new Date(endsAt).getTime() - Date.now()
-  if (diffMs <= 0) return 'истекла'
-  const hours = Math.floor(diffMs / (1000 * 60 * 60))
-  if (hours < 48) return `${Math.max(1, hours)} ч.`
-  return `${Math.ceil(hours / 24)} д.`
 }
 
 function formatDateTime(value) {
@@ -171,6 +170,22 @@ function botShortName(bot) {
   return bot?.name || 'Бот не назначен'
 }
 
+function normalizeParamFlags(monitoring) {
+  return {
+    photo: monitoring?.include_photo ?? true,
+    description: monitoring?.include_description ?? true,
+    seller: monitoring?.include_seller_info ?? true,
+    price_drop: monitoring?.notify_price_drop ?? true,
+  }
+}
+
+function resolveSpeedSurcharge(days) {
+  if (SPEED_SURCHARGE_BY_DAYS[days]) return SPEED_SURCHARGE_BY_DAYS[days]
+  if (Number(days) <= 7) return SPEED_SURCHARGE_BY_DAYS[7]
+  if (Number(days) <= 15) return SPEED_SURCHARGE_BY_DAYS[15]
+  return SPEED_SURCHARGE_BY_DAYS[30]
+}
+
 export default function App() {
   const [tab, setTab] = useState(TABS.subscriptions)
   const [subscriptionView, setSubscriptionView] = useState(SUBSCRIPTION_VIEW.home)
@@ -188,6 +203,8 @@ export default function App() {
   const [paramFlags, setParamFlags] = useState({})
 
   const [purchaseBusy, setPurchaseBusy] = useState(false)
+  const [trialBusy, setTrialBusy] = useState(false)
+  const [saveMonitoringBusy, setSaveMonitoringBusy] = useState(false)
   const [selectedType, setSelectedType] = useState(TYPE_OPTIONS[0].id)
   const [selectedPeriod, setSelectedPeriod] = useState(7)
   const [useReferralBalance, setUseReferralBalance] = useState(false)
@@ -242,11 +259,9 @@ export default function App() {
   )
 
   const periodOptions = useMemo(() => {
-    const daysFromPlans = Array.from(new Set(plans.map((plan) => Number(plan.duration_days)).filter(Boolean))).sort(
-      (a, b) => a - b,
-    )
-    if (daysFromPlans.length > 0) return daysFromPlans
-    return [7, 15, 30]
+    const daysFromPlans = plans.map((plan) => Number(plan.duration_days)).filter(Boolean)
+    const merged = Array.from(new Set([7, 15, 30, ...daysFromPlans])).sort((a, b) => a - b)
+    return merged.length > 0 ? merged : [7, 15, 30]
   }, [plans])
 
   useEffect(() => {
@@ -256,15 +271,18 @@ export default function App() {
   }, [periodOptions, selectedPeriod])
 
   const selectedPlan = useMemo(() => {
-    const candidates = plans
+    const byDuration = plans
       .filter((plan) => Number(plan.duration_days) === Number(selectedPeriod))
       .sort((a, b) => Number(a.price_rub) - Number(b.price_rub))
-    if (candidates.length > 0) return candidates[0]
+    if (byDuration.length > 0) return byDuration[0]
     return plans[0] || null
   }, [plans, selectedPeriod])
 
   const referralBalance = profile?.user?.referral_balance_rub ?? 0
-  const totalPrice = Math.max(0, Number(selectedPlan?.price_rub || 0) - (useReferralBalance ? referralBalance : 0))
+  const speedSurcharge = selectedType === 'speed' ? resolveSpeedSurcharge(Number(selectedPeriod)) : 0
+  const basePrice = Number(selectedPlan?.price_rub || 0)
+  const totalBeforeReferral = Math.max(0, basePrice + speedSurcharge)
+  const totalPrice = Math.max(0, totalBeforeReferral - (useReferralBalance ? referralBalance : 0))
 
   const loadData = async (tgId) => {
     const [profileData, plansData, monitoringsData, contentData] = await Promise.all([
@@ -278,6 +296,24 @@ export default function App() {
     setPlans(plansData)
     setMonitorings(monitoringsData)
     setMiniappContent(contentData || DEFAULT_MINIAPP_CONTENT)
+    setDrafts((prev) => {
+      const next = { ...prev }
+      monitoringsData.forEach((item) => {
+        const uid = String(item.id)
+        next[uid] = {
+          title: item.title || 'Подписка',
+          url: item.url || '',
+        }
+      })
+      return next
+    })
+    setParamFlags((prev) => {
+      const next = { ...prev }
+      monitoringsData.forEach((item) => {
+        next[String(item.id)] = normalizeParamFlags(item)
+      })
+      return next
+    })
 
     setSelectedMonitoringId((current) => {
       if (!current) return current
@@ -371,7 +407,7 @@ export default function App() {
       if (prev[uid]) return prev
       return {
         ...prev,
-        [uid]: { ...DEFAULT_PARAM_FLAGS },
+        [uid]: normalizeParamFlags(monitoring),
       }
     })
   }
@@ -421,20 +457,69 @@ export default function App() {
       const result = await purchaseSubscription({
         telegram_id: Number(telegramId),
         plan_id: Number(selectedPlan.id),
+        duration_days: Number(selectedPeriod),
+        subscription_type: selectedType,
+        use_referral_balance: useReferralBalance,
+        monitoring_id:
+          selectedMonitoring && !selectedMonitoring.virtual ? Number(selectedMonitoring.id) : null,
+        monitoring_title: buyDraft.title || null,
+        monitoring_url: buyDraft.url || null,
       })
 
       await loadData(telegramId)
-      if (result?.is_trial) {
-        setStatusMessage(`Активирован пробный период: ${selectedPlan.name}`)
-      } else {
-        setStatusMessage(`Подписка активирована: ${selectedPlan.name}`)
-      }
+      setStatusMessage(
+        `Подписка активирована: ${selectedPlan.name}. Итог к оплате: ${result?.amount_rub ?? totalPrice} ₽`,
+      )
       setSubscriptionView(selectedMonitoring ? SUBSCRIPTION_VIEW.detail : SUBSCRIPTION_VIEW.home)
     } catch (error) {
       const detail = error?.response?.data?.detail || error?.message || 'Ошибка покупки подписки'
       setStatusMessage(`Ошибка: ${detail}`)
     } finally {
       setPurchaseBusy(false)
+    }
+  }
+
+  const onActivateTrial = async () => {
+    if (!telegramId || trialBusy) return
+    try {
+      setTrialBusy(true)
+      const result = await onboardingTrial({ telegram_id: Number(telegramId) })
+      await loadData(telegramId)
+      if (result?.granted) {
+        setStatusMessage('Пробный период 24 часа активирован')
+      } else {
+        setStatusMessage('Пробный период уже использован или недоступен')
+      }
+    } catch (error) {
+      const detail = error?.response?.data?.detail || error?.message || 'Ошибка активации пробного периода'
+      setStatusMessage(`Ошибка: ${detail}`)
+    } finally {
+      setTrialBusy(false)
+    }
+  }
+
+  const saveMonitoringSettings = async () => {
+    if (!telegramId || !selectedMonitoring || selectedMonitoring.virtual || saveMonitoringBusy) return
+    const draft = drafts[selectedMonitoring.uid] || { title: selectedMonitoring.title || '', url: selectedMonitoring.url || '' }
+    const flags = paramFlags[selectedMonitoring.uid] || DEFAULT_PARAM_FLAGS
+    try {
+      setSaveMonitoringBusy(true)
+      await updateMonitoring(selectedMonitoring.id, {
+        telegram_id: Number(telegramId),
+        title: draft.title || null,
+        url: draft.url || '',
+        include_photo: !!flags.photo,
+        include_description: !!flags.description,
+        include_seller_info: !!flags.seller,
+        notify_price_drop: !!flags.price_drop,
+      })
+      await loadData(telegramId)
+      setStatusMessage('Настройки мониторинга сохранены')
+    } catch (error) {
+      const detail = error?.response?.data?.detail || error?.message || 'Ошибка сохранения настроек'
+      setStatusMessage(`Ошибка: ${detail}`)
+    } finally {
+      setSaveMonitoringBusy(false)
     }
   }
 
@@ -476,7 +561,7 @@ export default function App() {
     : { title: '', url: '' }
 
   const detailFlags = selectedMonitoring
-    ? paramFlags[selectedMonitoring.uid] || DEFAULT_PARAM_FLAGS
+    ? paramFlags[selectedMonitoring.uid] || normalizeParamFlags(selectedMonitoring)
     : DEFAULT_PARAM_FLAGS
 
   const detailBotLink = selectedMonitoring ? buildSubscriptionBotLink(selectedMonitoring.bot) : null
@@ -528,7 +613,8 @@ export default function App() {
                     <span className="subscription-body">
                       <strong>{monitoring.title || 'Тестовая подписка'}</strong>
                       <span>
-                        {(profile?.subscription?.plan_name || 'Стандарт')} - {formatRemaining(profile?.subscription?.ends_at)}
+                        {botShortName(monitoring.bot)} •{' '}
+                        {monitoring.link_configured ? 'ссылка задана' : 'ссылка не задана'}
                       </span>
                     </span>
 
@@ -561,6 +647,7 @@ export default function App() {
                     className="dark-input"
                     placeholder="Введите название подписки"
                     value={detailDraft.title}
+                    disabled={selectedMonitoring.virtual}
                     onChange={(event) => updateSelectedDraft({ title: event.target.value })}
                   />
 
@@ -569,6 +656,7 @@ export default function App() {
                     className="dark-input"
                     placeholder="Укажите ссылку на объявления"
                     value={detailDraft.url}
+                    disabled={selectedMonitoring.virtual}
                     onChange={(event) => updateSelectedDraft({ url: event.target.value })}
                   />
 
@@ -600,6 +688,15 @@ export default function App() {
                       </button>
                     ))}
                   </div>
+
+                  <button
+                    type="button"
+                    className="secondary-btn"
+                    onClick={saveMonitoringSettings}
+                    disabled={selectedMonitoring.virtual || saveMonitoringBusy}
+                  >
+                    {saveMonitoringBusy ? 'Сохранение...' : 'Сохранить настройки'}
+                  </button>
 
                   <p className="hint-text">
                     Перед первым запуском не забудь{' '}
@@ -695,6 +792,8 @@ export default function App() {
               <p className="hint-text">Укажите поисковую URL-ссылку на список объявлений из адресной строки браузера.</p>
 
               <div className="buy-summary">
+                <div className="summary-balance">База: {basePrice}₽</div>
+                {selectedType === 'speed' && <div className="summary-balance">Скоростная наценка: +{speedSurcharge}₽</div>}
                 <div className="summary-total">Итог: {totalPrice}₽</div>
                 <div className="summary-balance">Реф. баланс: {referralBalance}₽</div>
                 <button
@@ -706,6 +805,12 @@ export default function App() {
                   <span>Использовать реф. баланс для оплаты</span>
                 </button>
               </div>
+
+              {profile?.can_activate_trial && (
+                <button type="button" className="secondary-btn" onClick={onActivateTrial} disabled={trialBusy}>
+                  {trialBusy ? 'Активация...' : 'Включить пробный период 24 часа'}
+                </button>
+              )}
 
               <button type="button" className="primary-btn" onClick={onPurchase} disabled={!selectedPlan || purchaseBusy}>
                 {purchaseBusy ? 'Покупка...' : 'Оплатить через СБП 🔷'}
@@ -767,9 +872,29 @@ export default function App() {
                 </div>
 
                 <div className="profile-row">
-                  <span>Назначенный бот</span>
+                  <span>Все подписки</span>
                   <div>
-                    <strong>{selectedMonitoring ? botShortName(selectedMonitoring.bot) : '—'}</strong>
+                    <strong>
+                      {Array.isArray(profile?.subscriptions) && profile.subscriptions.length > 0
+                        ? profile.subscriptions
+                            .map(
+                              (sub) =>
+                                `${sub.plan_name}${sub.is_trial ? ' (тест)' : ''} до ${formatDateTime(sub.ends_at)}`,
+                            )
+                            .join(' | ')
+                        : 'Нет подписок'}
+                    </strong>
+                  </div>
+                </div>
+
+                <div className="profile-row">
+                  <span>Назначенные боты</span>
+                  <div>
+                    <strong>
+                      {Array.isArray(profile?.assigned_bots) && profile.assigned_bots.length > 0
+                        ? profile.assigned_bots.map((bot) => botShortName(bot)).join(', ')
+                        : '—'}
+                    </strong>
                   </div>
                 </div>
               </div>

@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     miniapp_access_cookie_name: str = "miniapp_access_token"
     miniapp_refresh_cookie_name: str = "miniapp_refresh_token"
     proxy_block_cooldown_minutes: int = 30
+    referral_reward_percent: int = 10
+    admin_notify_chat_ids: str = ""
+    speed_surcharge_7_days_rub: int = 300
+    speed_surcharge_15_days_rub: int = 500
+    speed_surcharge_30_days_rub: int = 800
 
 
 settings = Settings()

@@ -10,6 +10,7 @@ from app.schemas import (
     MiniAppContentUpdate,
     PaymentCreate,
     PaymentResponse,
+    MonitoringAdminUpdate,
     ProxyCreate,
     ProxyResponse,
     ProxyUpdate,
@@ -30,6 +31,7 @@ from app.services.helpers import (
     get_or_create_user,
     get_trial_days,
     now_utc,
+    normalize_monitoring_url,
     set_miniapp_content_settings,
     set_trial_days,
 )
@@ -201,11 +203,66 @@ def monitorings(db: Session = Depends(get_db)) -> list[dict]:
                 "title": row.title,
                 "is_active": row.is_active,
                 "link_configured": row.link_configured,
+                "include_photo": row.include_photo,
+                "include_description": row.include_description,
+                "include_seller_info": row.include_seller_info,
+                "notify_price_drop": row.notify_price_drop,
                 "last_checked_at": row.last_checked_at,
                 "created_at": row.created_at,
             }
         )
     return result
+
+
+@router.put("/monitorings/{monitoring_id}")
+def update_monitoring(monitoring_id: int, payload: MonitoringAdminUpdate, db: Session = Depends(get_db)) -> dict:
+    monitoring = db.get(Monitoring, monitoring_id)
+    if not monitoring:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Monitoring not found")
+
+    if payload.title is not None:
+        monitoring.title = payload.title.strip() or monitoring.title
+
+    if payload.url is not None:
+        cleaned_url = normalize_monitoring_url(payload.url)
+        monitoring.url = cleaned_url
+        monitoring.link_configured = bool(cleaned_url)
+
+    if payload.is_active is not None:
+        if payload.is_active and not monitoring.link_configured:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Сначала задайте ссылку")
+        monitoring.is_active = payload.is_active
+
+    if payload.include_photo is not None:
+        monitoring.include_photo = payload.include_photo
+    if payload.include_description is not None:
+        monitoring.include_description = payload.include_description
+    if payload.include_seller_info is not None:
+        monitoring.include_seller_info = payload.include_seller_info
+    if payload.notify_price_drop is not None:
+        monitoring.notify_price_drop = payload.notify_price_drop
+
+    db.commit()
+    db.refresh(monitoring)
+    bot_name = monitoring.bot.name if monitoring.bot else None
+    bot_link = _build_bot_link(monitoring.bot.bot_username) if monitoring.bot else None
+    return {
+        "id": monitoring.id,
+        "user_id": monitoring.user_id,
+        "bot_id": monitoring.bot_id,
+        "bot_name": bot_name,
+        "bot_link": bot_link,
+        "url": monitoring.url,
+        "title": monitoring.title,
+        "is_active": monitoring.is_active,
+        "link_configured": monitoring.link_configured,
+        "include_photo": monitoring.include_photo,
+        "include_description": monitoring.include_description,
+        "include_seller_info": monitoring.include_seller_info,
+        "notify_price_drop": monitoring.notify_price_drop,
+        "last_checked_at": monitoring.last_checked_at,
+        "created_at": monitoring.created_at,
+    }
 
 
 @router.get("/bots", response_model=list[TelegramBotResponse])

@@ -2,6 +2,9 @@
 
 <section class="card">
   <h1>Мониторинги Avito</h1>
+  <% if (success) { %>
+    <div class="alert info"><%= success %></div>
+  <% } %>
   <% if (error) { %>
     <div class="alert error"><%= error %></div>
   <% } %>
@@ -15,6 +18,7 @@
           <th>Название / URL</th>
           <th>Последняя проверка</th>
           <th>Статус</th>
+          <th>Управление</th>
         </tr>
       </thead>
       <tbody>
@@ -48,6 +52,33 @@
             <% if (!m.link_configured) { %>
               <span class="badge pending">no-link</span>
             <% } %>
+          </td>
+          <td>
+            <form class="stack" action="<%= adminBase %>/monitorings/<%= m.id %>/update" method="post">
+              <input name="title" value="<%= m.title || '' %>" placeholder="Название" />
+              <input name="url" value="<%= m.url || '' %>" placeholder="https://www.avito.ru/..." />
+              <label>
+                <input name="is_active" type="checkbox" <%= m.is_active ? 'checked' : '' %> />
+                Активен
+              </label>
+              <label>
+                <input name="include_photo" type="checkbox" <%= m.include_photo ? 'checked' : '' %> />
+                Фотография
+              </label>
+              <label>
+                <input name="include_description" type="checkbox" <%= m.include_description ? 'checked' : '' %> />
+                Описание
+              </label>
+              <label>
+                <input name="include_seller_info" type="checkbox" <%= m.include_seller_info ? 'checked' : '' %> />
+                Инфо продавца
+              </label>
+              <label>
+                <input name="notify_price_drop" type="checkbox" <%= m.notify_price_drop ? 'checked' : '' %> />
+                Снижение цены
+              </label>
+              <button type="submit">Сохранить</button>
+            </form>
           </td>
         </tr>
       <% }) %>

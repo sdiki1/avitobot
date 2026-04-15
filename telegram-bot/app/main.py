@@ -34,6 +34,7 @@ BOTS_REFRESH_SEC = int(os.getenv("BOTS_REFRESH_SEC", "15"))
 NOTIFY_POLL_SEC = float(os.getenv("NOTIFY_POLL_SEC", "1"))
 NOTIFY_BACKLOG_POLL_SEC = float(os.getenv("NOTIFY_BACKLOG_POLL_SEC", "0.2"))
 NOTIFY_FETCH_LIMIT = int(os.getenv("NOTIFY_FETCH_LIMIT", "300"))
+NOTIFY_SEND_CONCURRENCY = int(os.getenv("NOTIFY_SEND_CONCURRENCY", "8"))
 PHOTO_RETRY_ATTEMPTS = int(os.getenv("PHOTO_RETRY_ATTEMPTS", "3"))
 PHOTO_RETRY_BASE_DELAY_SEC = float(os.getenv("PHOTO_RETRY_BASE_DELAY_SEC", "1.5"))
 PHOTO_DOWNLOAD_TIMEOUT_SEC = float(os.getenv("PHOTO_DOWNLOAD_TIMEOUT_SEC", "12"))
@@ -144,6 +145,15 @@ def _extract_start_arg(text: str | None) -> str:
     return parts[1].strip().lower()
 
 
+def _extract_referral_code(start_arg: str) -> str | None:
+    value = (start_arg or "").strip().lower()
+    if not value.startswith("ref_"):
+        return None
+    if not re.fullmatch(r"ref_[a-z0-9_]+", value):
+        return None
+    return value
+
+
 def _looks_like_url(value: str) -> bool:
     lowered = value.lower()
     return lowered.startswith("http://") or lowered.startswith("https://")
@@ -158,6 +168,26 @@ def _fit_photo_caption(value: str, max_len: int = 1024) -> str:
     if len(plain_text) <= max_len:
         return plain_text
     return f"{plain_text[: max_len - 1]}…"
+
+
+async def _pin_monitoring_link(bot: Bot, chat_id: int, monitoring_url: str) -> None:
+    link = str(monitoring_url or "").strip()
+    if not link:
+        return
+    try:
+        message = await bot.send_message(
+            chat_id=chat_id,
+            text=f"📌 Активная ссылка мониторинга:\n{link}",
+            disable_web_page_preview=True,
+        )
+        with suppress(Exception):
+            await bot.pin_chat_message(
+                chat_id=chat_id,
+                message_id=message.message_id,
+                disable_notification=True,
+            )
+    except Exception as exc:
+        logger.warning("Failed to pin monitoring link chat_id={} url={} error={}", chat_id, link, exc)
 
 
 def _is_retryable_photo_error(exc: Exception) -> bool:
@@ -410,11 +440,18 @@ class BackendAPI:
     async def close(self) -> None:
         await self.client.aclose()
 
-    async def auth_user(self, telegram_id: int, username: str | None, full_name: str | None) -> dict[str, Any]:
+    async def auth_user(
+        self,
+        telegram_id: int,
+        username: str | None,
+        full_name: str | None,
+        referral_code: str | None = None,
+    ) -> dict[str, Any]:
         payload = {
             "telegram_id": telegram_id,
             "username": username,
             "full_name": full_name,
+            "referral_code": referral_code,
         }
         response = await self.client.post(f"{BACKEND_URL}/api/v1/public/auth/telegram", json=payload)
         response.raise_for_status()
@@ -533,23 +570,28 @@ def build_router(bot_id: int, backend: BackendAPI, *, is_primary: bool = False) 
         @router.message(CommandStart())
         async def cmd_start_primary(message: Message) -> None:
             tg_user = message.from_user
+            start_arg = _extract_start_arg(message.text)
+            referral_code = _extract_referral_code(start_arg)
             await backend.auth_user(
                 telegram_id=tg_user.id,
                 username=tg_user.username,
                 full_name=tg_user.full_name,
+                referral_code=referral_code,
             )
-            trial_prefix = ""
-            try:
-                trial_payload = await backend.onboarding_trial(tg_user.id)
-                if trial_payload.get("granted") is True:
-                    trial_prefix = "Вам начислено тестовый период мониторинга: 2 дня\n\n"
-            except Exception as exc:
-                logger.warning(f"Failed to grant onboarding trial for user {tg_user.id}: {exc}")
-
             text = (
-                f"{trial_prefix}"
-                "Этот бот мониторит новые объявления на Avito.\n"
-                "Откройте MiniApp, чтобы управлять подпиской и назначенными ботами."
+                "Уважаемые пользователи. Представленное программное обеспечение предназначено для мониторинга "
+                "объявлений на платформе Авито.\n\n"
+                "Целевая аудитория приложения включает:\n"
+                "- Предпринимателей, занимающихся перепродажей товаров;\n"
+                "- Риэлторов;\n"
+                "- Пользователей, заинтересованных в поиске товаров по заданным критериям на Авито.\n\n"
+                "Сферы применения: автомобили, электроника, недвижимость, запчасти, вакансии, услуги.\n\n"
+                "Использование данного сервиса обеспечивает преимущество в скорости отклика и возможность "
+                "приобретения товаров по наиболее выгодной цене.\n\n"
+                "Программное обеспечение позволяет отслеживать новые публикации и отправлять уведомления в Telegram.\n\n"
+                "Для новых пользователей предусмотрен пробный период.\n\n"
+                "Желаете ли вы воспользоваться данным приложением? Для этого необходимо нажать кнопку "
+                "«Открыть приложение»."
             )
             await message.answer(text, reply_markup=miniapp_keyboard(tg_user.id))
 
@@ -591,6 +633,7 @@ def build_router(bot_id: int, backend: BackendAPI, *, is_primary: bool = False) 
                 f"Мониторинг запущен.\n\n{_format_monitoring_status(payload)}",
                 reply_markup=monitoring_actions_keyboard(message.from_user.id),
             )
+            await _pin_monitoring_link(message.bot, chat_id=message.from_user.id, monitoring_url=payload.get("url"))
             return
         await message.answer(
             f"Не удалось запустить: {_extract_error(payload)}",
@@ -623,6 +666,7 @@ def build_router(bot_id: int, backend: BackendAPI, *, is_primary: bool = False) 
                 "Для запуска используйте кнопку «Запустить мониторинг».",
                 reply_markup=monitoring_actions_keyboard(message.from_user.id),
             )
+            await _pin_monitoring_link(message.bot, chat_id=message.from_user.id, monitoring_url=payload.get("url"))
             return True
         await message.answer(
             f"Не удалось изменить ссылку: {_extract_error(payload)}",
@@ -641,12 +685,14 @@ def build_router(bot_id: int, backend: BackendAPI, *, is_primary: bool = False) 
     async def cmd_start(message: Message, state: FSMContext) -> None:
         await state.clear()
         tg_user = message.from_user
+        start_arg = _extract_start_arg(message.text)
+        referral_code = _extract_referral_code(start_arg)
         await backend.auth_user(
             telegram_id=tg_user.id,
             username=tg_user.username,
             full_name=tg_user.full_name,
+            referral_code=referral_code,
         )
-        start_arg = _extract_start_arg(message.text)
         status_code, payload = await backend.current_monitoring(bot_id=bot_id, telegram_id=tg_user.id)
 
         if start_arg == "subscription":
@@ -909,6 +955,102 @@ async def bots_sync_loop(manager: MultiBotManager, stop_event: asyncio.Event) ->
 
 async def notifications_loop(manager: MultiBotManager, backend: BackendAPI, stop_event: asyncio.Event) -> None:
     rate_limit_cooldowns: dict[tuple[int, int, int], datetime] = {}
+    send_semaphore = asyncio.Semaphore(max(1, NOTIFY_SEND_CONCURRENCY))
+
+    async def deliver_notification(notification: dict[str, Any]) -> None:
+        bot_id = int(notification.get("bot_id") or 0)
+        runtime = manager.runtimes.get(bot_id)
+        if not runtime:
+            return
+
+        async with send_semaphore:
+            try:
+                text = str(notification.get("message") or "").strip()
+                photo_url = str(notification.get("photo_url") or "").strip()
+                if photo_url:
+                    try:
+                        if len(text) > 1000:
+                            await _send_photo_with_retry(
+                                bot=runtime.bot,
+                                chat_id=notification["telegram_id"],
+                                photo_url=photo_url,
+                            )
+                            await runtime.bot.send_message(
+                                chat_id=notification["telegram_id"],
+                                text=text,
+                                parse_mode="HTML",
+                                disable_web_page_preview=True,
+                            )
+                        else:
+                            await _send_photo_with_retry(
+                                bot=runtime.bot,
+                                chat_id=notification["telegram_id"],
+                                photo_url=photo_url,
+                                caption=_fit_photo_caption(text),
+                                parse_mode="HTML",
+                            )
+                    except Exception as exc:
+                        logger.warning(
+                            "send_photo failed for notification id={} photo_url={}: {}",
+                            notification.get("id"),
+                            photo_url,
+                            exc,
+                        )
+                        await _maybe_send_rate_limit_warning(runtime, notification, exc, rate_limit_cooldowns)
+                        sent_with_download = False
+                        downloaded = await _download_photo_bytes(photo_url)
+                        if downloaded:
+                            photo_data, filename = downloaded
+                            try:
+                                if len(text) > 1000:
+                                    await _send_downloaded_photo_with_retry(
+                                        bot=runtime.bot,
+                                        chat_id=notification["telegram_id"],
+                                        photo_data=photo_data,
+                                        filename=filename,
+                                    )
+                                    await runtime.bot.send_message(
+                                        chat_id=notification["telegram_id"],
+                                        text=text,
+                                        parse_mode="HTML",
+                                        disable_web_page_preview=True,
+                                    )
+                                else:
+                                    await _send_downloaded_photo_with_retry(
+                                        bot=runtime.bot,
+                                        chat_id=notification["telegram_id"],
+                                        photo_data=photo_data,
+                                        filename=filename,
+                                        caption=_fit_photo_caption(text),
+                                        parse_mode="HTML",
+                                    )
+                                sent_with_download = True
+                            except Exception as download_exc:
+                                logger.warning(
+                                    "send_photo(downloaded) failed for notification id={} photo_url={}: {}",
+                                    notification.get("id"),
+                                    photo_url,
+                                    download_exc,
+                                )
+
+                        if not sent_with_download:
+                            await runtime.bot.send_message(
+                                chat_id=notification["telegram_id"],
+                                text=text,
+                                parse_mode="HTML",
+                                disable_web_page_preview=False,
+                            )
+                else:
+                    await runtime.bot.send_message(
+                        chat_id=notification["telegram_id"],
+                        text=text,
+                        parse_mode="HTML",
+                        disable_web_page_preview=False,
+                    )
+                await backend.mark_notification_sent(notification["id"])
+            except Exception as exc:
+                await _maybe_send_rate_limit_warning(runtime, notification, exc, rate_limit_cooldowns)
+                logger.warning(f"Failed to deliver notification id={notification.get('id')}: {exc}")
 
     while not stop_event.is_set():
         had_notifications = False
@@ -919,98 +1061,8 @@ async def notifications_loop(manager: MultiBotManager, backend: BackendAPI, stop
         try:
             notifications = await backend.pending_notifications(limit=max(1, min(NOTIFY_FETCH_LIMIT, 500)))
             had_notifications = bool(notifications)
-            for notification in notifications:
-                bot_id = int(notification.get("bot_id") or 0)
-                runtime = manager.runtimes.get(bot_id)
-                if not runtime:
-                    continue
-                try:
-                    text = str(notification.get("message") or "").strip()
-                    photo_url = str(notification.get("photo_url") or "").strip()
-                    if photo_url:
-                        try:
-                            if len(text) > 1000:
-                                await _send_photo_with_retry(
-                                    bot=runtime.bot,
-                                    chat_id=notification["telegram_id"],
-                                    photo_url=photo_url,
-                                )
-                                await runtime.bot.send_message(
-                                    chat_id=notification["telegram_id"],
-                                    text=text,
-                                    parse_mode="HTML",
-                                    disable_web_page_preview=True,
-                                )
-                            else:
-                                await _send_photo_with_retry(
-                                    bot=runtime.bot,
-                                    chat_id=notification["telegram_id"],
-                                    photo_url=photo_url,
-                                    caption=_fit_photo_caption(text),
-                                    parse_mode="HTML",
-                                )
-                        except Exception as exc:
-                            logger.warning(
-                                "send_photo failed for notification id={} photo_url={}: {}",
-                                notification.get("id"),
-                                photo_url,
-                                exc,
-                            )
-                            await _maybe_send_rate_limit_warning(runtime, notification, exc, rate_limit_cooldowns)
-                            sent_with_download = False
-                            downloaded = await _download_photo_bytes(photo_url)
-                            if downloaded:
-                                photo_data, filename = downloaded
-                                try:
-                                    if len(text) > 1000:
-                                        await _send_downloaded_photo_with_retry(
-                                            bot=runtime.bot,
-                                            chat_id=notification["telegram_id"],
-                                            photo_data=photo_data,
-                                            filename=filename,
-                                        )
-                                        await runtime.bot.send_message(
-                                            chat_id=notification["telegram_id"],
-                                            text=text,
-                                            parse_mode="HTML",
-                                            disable_web_page_preview=True,
-                                        )
-                                    else:
-                                        await _send_downloaded_photo_with_retry(
-                                            bot=runtime.bot,
-                                            chat_id=notification["telegram_id"],
-                                            photo_data=photo_data,
-                                            filename=filename,
-                                            caption=_fit_photo_caption(text),
-                                            parse_mode="HTML",
-                                        )
-                                    sent_with_download = True
-                                except Exception as download_exc:
-                                    logger.warning(
-                                        "send_photo(downloaded) failed for notification id={} photo_url={}: {}",
-                                        notification.get("id"),
-                                        photo_url,
-                                        download_exc,
-                                    )
-
-                            if not sent_with_download:
-                                await runtime.bot.send_message(
-                                    chat_id=notification["telegram_id"],
-                                    text=text,
-                                    parse_mode="HTML",
-                                    disable_web_page_preview=False,
-                                )
-                    else:
-                        await runtime.bot.send_message(
-                            chat_id=notification["telegram_id"],
-                            text=text,
-                            parse_mode="HTML",
-                            disable_web_page_preview=False,
-                        )
-                    await backend.mark_notification_sent(notification["id"])
-                except Exception as exc:
-                    await _maybe_send_rate_limit_warning(runtime, notification, exc, rate_limit_cooldowns)
-                    logger.warning(f"Failed to deliver notification id={notification.get('id')}: {exc}")
+            if notifications:
+                await asyncio.gather(*(deliver_notification(notification) for notification in notifications))
         except Exception as exc:
             logger.error(f"Notifications loop failed: {exc}")
 
