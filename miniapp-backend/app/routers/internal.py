@@ -147,8 +147,8 @@ def mark_proxy_blocked(payload: InternalProxyBlockedRequest, db: Session = Depen
         return {"ok": False, "updated": False, "reason": "proxy not found"}
 
     now = now_utc()
-    cooldown_minutes = max(1, int(settings.proxy_block_cooldown_minutes))
-    proxy.cooldown_until = now + timedelta(minutes=cooldown_minutes)
+    cooldown_seconds = max(1, int(settings.proxy_block_cooldown_total_seconds))
+    proxy.cooldown_until = now + timedelta(seconds=cooldown_seconds)
     proxy.last_blocked_at = now
     proxy.last_block_status = payload.status_code
     proxy.fail_count = int(proxy.fail_count or 0) + 1

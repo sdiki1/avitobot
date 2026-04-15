@@ -28,7 +28,8 @@ class Settings(BaseSettings):
     miniapp_auth_cookie_samesite: str = "lax"
     miniapp_access_cookie_name: str = "miniapp_access_token"
     miniapp_refresh_cookie_name: str = "miniapp_refresh_token"
-    proxy_block_cooldown_minutes: int = 30
+    proxy_block_cooldown_seconds: int | None = None
+    proxy_block_cooldown_minutes: int | None = Field(default=None, validation_alias="PROXY_BLOCK_COOLDOWN_MINUTES")
     redis_url: str = "redis://redis:6379/0"
     redis_notify_queue_prefix: str = "notify:bot:"
     referral_reward_percent: int = 10
@@ -36,6 +37,14 @@ class Settings(BaseSettings):
     speed_surcharge_7_days_rub: int = 300
     speed_surcharge_15_days_rub: int = 500
     speed_surcharge_30_days_rub: int = 800
+
+    @property
+    def proxy_block_cooldown_total_seconds(self) -> int:
+        if self.proxy_block_cooldown_seconds is not None:
+            return max(1, int(self.proxy_block_cooldown_seconds))
+        if self.proxy_block_cooldown_minutes is not None:
+            return max(1, int(self.proxy_block_cooldown_minutes) * 60)
+        return 3
 
 
 settings = Settings()

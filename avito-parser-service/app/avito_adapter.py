@@ -23,7 +23,7 @@ from common_data import HEADERS  # type: ignore  # noqa: E402
 from dto import AvitoConfig  # type: ignore  # noqa: E402
 from filters.ads_filter import AdsFilter  # type: ignore  # noqa: E402
 from models import ItemsResponse, Item  # type: ignore  # noqa: E402
-from app.config import BACKEND_URL, INTERNAL_API_TOKEN, PROXY_BLOCK_COOLDOWN_MINUTES, REQUEST_TIMEOUT_SEC
+from app.config import BACKEND_URL, INTERNAL_API_TOKEN, PROXY_BLOCK_COOLDOWN_SECONDS, REQUEST_TIMEOUT_SEC
 
 
 class AvitoAdapter:
@@ -140,8 +140,8 @@ class AvitoAdapter:
         return True
 
     def _set_local_proxy_cooldown(self, proxy_url: str) -> None:
-        cooldown_minutes = max(1, int(PROXY_BLOCK_COOLDOWN_MINUTES))
-        self._proxy_cooldown_until[proxy_url] = datetime.now(timezone.utc) + timedelta(minutes=cooldown_minutes)
+        cooldown_seconds = max(1, int(PROXY_BLOCK_COOLDOWN_SECONDS))
+        self._proxy_cooldown_until[proxy_url] = datetime.now(timezone.utc) + timedelta(seconds=cooldown_seconds)
 
     def _report_blocked_proxy(self, proxy_url: str, status_code: int, source_url: str) -> None:
         payload = {
