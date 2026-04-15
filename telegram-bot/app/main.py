@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 from datetime import datetime, timedelta, timezone
 import os
 import re
@@ -39,6 +40,9 @@ PHOTO_RETRY_ATTEMPTS = int(os.getenv("PHOTO_RETRY_ATTEMPTS", "3"))
 PHOTO_RETRY_BASE_DELAY_SEC = float(os.getenv("PHOTO_RETRY_BASE_DELAY_SEC", "1.5"))
 PHOTO_DOWNLOAD_TIMEOUT_SEC = float(os.getenv("PHOTO_DOWNLOAD_TIMEOUT_SEC", "12"))
 RATE_LIMIT_ALERT_COOLDOWN_SEC = int(os.getenv("RATE_LIMIT_ALERT_COOLDOWN_SEC", "900"))
+MONITORING_BURST_WINDOW_SEC = float(os.getenv("MONITORING_BURST_WINDOW_SEC", "30"))
+MONITORING_BURST_MAX_MESSAGES = int(os.getenv("MONITORING_BURST_MAX_MESSAGES", "10"))
+MONITORING_BURST_ALERT_COOLDOWN_SEC = int(os.getenv("MONITORING_BURST_ALERT_COOLDOWN_SEC", "120"))
 
 BTN_START_MONITORING = "▶️ Запустить мониторинг"
 BTN_STOP_MONITORING = "⏹ Остановить мониторинг"
@@ -395,6 +399,16 @@ def _rate_limit_warning_text(monitoring_url: str) -> str:
     )
 
 
+def _monitoring_burst_warning_text(monitoring_url: str) -> str:
+    return (
+        "Ссылка слишком активна!\n"
+        f"🔗 Ссылка: {monitoring_url}\n\n"
+        "За последние 30 секунд найдено слишком много объявлений.\n"
+        "Отправлено только первые 10, остальные пропущены.\n\n"
+        "Сузьте фильтр: используйте категории, город и ограничения по цене."
+    )
+
+
 async def _maybe_send_rate_limit_warning(
     runtime: "BotRuntime",
     notification: dict[str, Any],
@@ -427,6 +441,45 @@ async def _maybe_send_rate_limit_warning(
     except Exception as warn_exc:
         logger.warning(
             "Failed to send rate-limit warning notification_id={} monitoring_id={} error={}",
+            notification.get("id"),
+            monitoring_id,
+            warn_exc,
+        )
+
+
+async def _maybe_send_monitoring_burst_warning(
+    runtime: "BotRuntime",
+    notification: dict[str, Any],
+    cooldowns: dict[tuple[int, int, int], datetime],
+) -> None:
+    bot_id = int(notification.get("bot_id") or 0)
+    chat_id = int(notification.get("telegram_id") or 0)
+    monitoring_id = int(notification.get("monitoring_id") or 0)
+    key = (bot_id, chat_id, monitoring_id)
+
+    now = datetime.now(timezone.utc)
+    cooldown_until = cooldowns.get(key)
+    if cooldown_until and now < cooldown_until:
+        return
+
+    monitoring_url = str(notification.get("monitoring_url") or "").strip() or "не указана"
+    text = _monitoring_burst_warning_text(monitoring_url)
+
+    try:
+        await runtime.bot.send_message(
+            chat_id=chat_id,
+            text=text,
+            disable_web_page_preview=False,
+        )
+        cooldowns[key] = now + timedelta(
+            seconds=max(
+                int(max(1.0, MONITORING_BURST_WINDOW_SEC)),
+                max(30, MONITORING_BURST_ALERT_COOLDOWN_SEC),
+            )
+        )
+    except Exception as warn_exc:
+        logger.warning(
+            "Failed to send burst warning notification_id={} monitoring_id={} error={}",
             notification.get("id"),
             monitoring_id,
             warn_exc,
@@ -955,6 +1008,8 @@ async def bots_sync_loop(manager: MultiBotManager, stop_event: asyncio.Event) ->
 
 async def notifications_loop(manager: MultiBotManager, backend: BackendAPI, stop_event: asyncio.Event) -> None:
     rate_limit_cooldowns: dict[tuple[int, int, int], datetime] = {}
+    burst_warning_cooldowns: dict[tuple[int, int, int], datetime] = {}
+    monitoring_recent_sent: dict[int, deque[datetime]] = {}
     send_semaphore = asyncio.Semaphore(max(1, NOTIFY_SEND_CONCURRENCY))
 
     async def deliver_notification(notification: dict[str, Any]) -> None:
@@ -1058,11 +1113,77 @@ async def notifications_loop(manager: MultiBotManager, backend: BackendAPI, stop
         stale_keys = [key for key, expires_at in rate_limit_cooldowns.items() if expires_at <= now]
         for key in stale_keys:
             rate_limit_cooldowns.pop(key, None)
+        stale_burst_keys = [key for key, expires_at in burst_warning_cooldowns.items() if expires_at <= now]
+        for key in stale_burst_keys:
+            burst_warning_cooldowns.pop(key, None)
+
+        window_cutoff = now - timedelta(seconds=max(1.0, MONITORING_BURST_WINDOW_SEC))
+        for monitoring_id in list(monitoring_recent_sent.keys()):
+            bucket = monitoring_recent_sent.get(monitoring_id)
+            if not bucket:
+                monitoring_recent_sent.pop(monitoring_id, None)
+                continue
+            while bucket and bucket[0] <= window_cutoff:
+                bucket.popleft()
+            if not bucket:
+                monitoring_recent_sent.pop(monitoring_id, None)
+
         try:
             notifications = await backend.pending_notifications(limit=max(1, min(NOTIFY_FETCH_LIMIT, 500)))
             had_notifications = bool(notifications)
             if notifications:
-                await asyncio.gather(*(deliver_notification(notification) for notification in notifications))
+                allowed_notifications: list[dict[str, Any]] = []
+                dropped_notifications = 0
+
+                for notification in notifications:
+                    bot_id = int(notification.get("bot_id") or 0)
+                    runtime = manager.runtimes.get(bot_id)
+                    if not runtime:
+                        allowed_notifications.append(notification)
+                        continue
+
+                    monitoring_id = int(notification.get("monitoring_id") or 0)
+                    if (
+                        monitoring_id <= 0
+                        or MONITORING_BURST_MAX_MESSAGES <= 0
+                        or MONITORING_BURST_WINDOW_SEC <= 0
+                    ):
+                        allowed_notifications.append(notification)
+                        continue
+
+                    bucket = monitoring_recent_sent.setdefault(monitoring_id, deque())
+                    cutoff = datetime.now(timezone.utc) - timedelta(seconds=max(1.0, MONITORING_BURST_WINDOW_SEC))
+                    while bucket and bucket[0] <= cutoff:
+                        bucket.popleft()
+
+                    if len(bucket) >= MONITORING_BURST_MAX_MESSAGES:
+                        dropped_notifications += 1
+                        try:
+                            await backend.mark_notification_sent(notification["id"])
+                        except Exception as mark_exc:
+                            logger.warning(
+                                "Failed to drop notification id={} for monitoring={} by burst limiter: {}",
+                                notification.get("id"),
+                                monitoring_id,
+                                mark_exc,
+                            )
+                            continue
+                        await _maybe_send_monitoring_burst_warning(runtime, notification, burst_warning_cooldowns)
+                        continue
+
+                    bucket.append(datetime.now(timezone.utc))
+                    allowed_notifications.append(notification)
+
+                if dropped_notifications:
+                    logger.warning(
+                        "Burst limiter dropped {} notifications in this cycle (window={}s max={})",
+                        dropped_notifications,
+                        MONITORING_BURST_WINDOW_SEC,
+                        MONITORING_BURST_MAX_MESSAGES,
+                    )
+
+                if allowed_notifications:
+                    await asyncio.gather(*(deliver_notification(notification) for notification in allowed_notifications))
         except Exception as exc:
             logger.error(f"Notifications loop failed: {exc}")
 
