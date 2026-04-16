@@ -8,7 +8,14 @@ from loguru import logger
 import requests
 
 from app.avito_adapter import AvitoAdapter
-from app.config import BACKEND_URL, INTERNAL_API_TOKEN, PARSER_MAX_WORKERS, POLL_INTERVAL_SEC, REQUEST_TIMEOUT_SEC
+from app.config import (
+    BACKEND_URL,
+    INTERNAL_API_TOKEN,
+    PARSER_MAX_WORKERS,
+    PARSER_PROXY_LIST,
+    POLL_INTERVAL_SEC,
+    REQUEST_TIMEOUT_SEC,
+)
 
 
 def backend_headers() -> dict[str, str]:
@@ -44,6 +51,8 @@ def process_monitoring(mon: dict[str, Any]) -> tuple[int, str, int, dict[str, An
 
 def main() -> None:
     logger.info("Avito parser worker started")
+    if PARSER_PROXY_LIST:
+        logger.info("Proxy list loaded from env: {}", len(PARSER_PROXY_LIST))
 
     while True:
         cycle_started = time.time()

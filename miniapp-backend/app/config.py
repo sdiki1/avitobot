@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     speed_surcharge_7_days_rub: int = 300
     speed_surcharge_15_days_rub: int = 500
     speed_surcharge_30_days_rub: int = 800
+    parser_proxy_list: str = ""
 
     @property
     def proxy_block_cooldown_total_seconds(self) -> int:

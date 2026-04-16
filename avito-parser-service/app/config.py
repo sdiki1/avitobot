@@ -1,4 +1,5 @@
 import os
+import re
 
 
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8001").rstrip("/")
@@ -14,3 +15,15 @@ elif _proxy_block_cooldown_minutes_env is not None:
 else:
     PROXY_BLOCK_COOLDOWN_SECONDS = 3
 PARSER_MAX_WORKERS = int(os.getenv("PARSER_MAX_WORKERS", "6"))
+
+
+def _parse_proxy_list(raw_value: str | None) -> list[str]:
+    proxies: list[str] = []
+    for candidate in re.split(r"[,\n;]", raw_value or ""):
+        cleaned = candidate.strip()
+        if cleaned and cleaned not in proxies:
+            proxies.append(cleaned)
+    return proxies
+
+
+PARSER_PROXY_LIST = _parse_proxy_list(os.getenv("PARSER_PROXY_LIST"))

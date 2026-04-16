@@ -1,10 +1,12 @@
+import re
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import Base, engine
-from app.models import AppSetting, TariffPlan, TelegramBot
-from app.services.helpers import DEFAULT_TRIAL_DAYS, MINIAPP_CONTENT_DEFAULTS, TRIAL_DAYS_SETTING_KEY
+from app.models import AppSetting, ProxyConfig, TariffPlan, TelegramBot
+from app.services.helpers import DEFAULT_TRIAL_DAYS, MINIAPP_CONTENT_DEFAULTS, TRIAL_DAYS_SETTING_KEY, normalize_proxy_url
 
 
 DEFAULT_PLANS = [
@@ -23,6 +25,72 @@ DEFAULT_PLANS = [
         "price_rub": 500,
     },
 ]
+
+ENV_PROXY_NAME_PREFIX = "env-proxy-"
+
+
+def _parse_env_proxy_list(raw_value: str) -> list[str]:
+    proxies: list[str] = []
+    for candidate in re.split(r"[,\n;]", raw_value or ""):
+        normalized = normalize_proxy_url(candidate)
+        if normalized and normalized not in proxies:
+            proxies.append(normalized)
+    return proxies
+
+
+def _build_env_proxy_name(taken_names: set[str], start_index: int) -> tuple[str, int]:
+    index = max(1, int(start_index))
+    while True:
+        name = f"{ENV_PROXY_NAME_PREFIX}{index}"
+        index += 1
+        if name in taken_names:
+            continue
+        taken_names.add(name)
+        return name, index
+
+
+def _sync_env_proxies(db: Session) -> None:
+    configured_proxy_urls = _parse_env_proxy_list(settings.parser_proxy_list)
+    proxies = db.scalars(select(ProxyConfig).order_by(ProxyConfig.id.asc())).all()
+
+    if not configured_proxy_urls:
+        for proxy in proxies:
+            if proxy.name.startswith(ENV_PROXY_NAME_PREFIX):
+                proxy.is_active = False
+        return
+
+    normalized_to_proxy: dict[str, ProxyConfig] = {}
+    for proxy in proxies:
+        normalized = normalize_proxy_url(proxy.proxy_url)
+        if normalized and normalized not in normalized_to_proxy:
+            normalized_to_proxy[normalized] = proxy
+
+    taken_names = {proxy.name for proxy in proxies}
+    env_name_index = 1
+    configured_ids: set[int] = set()
+
+    for proxy_url in configured_proxy_urls:
+        existing = normalized_to_proxy.get(proxy_url)
+        if existing:
+            existing.proxy_url = proxy_url
+            existing.is_active = True
+            configured_ids.add(existing.id)
+            continue
+
+        env_name, env_name_index = _build_env_proxy_name(taken_names, env_name_index)
+        created = ProxyConfig(
+            name=env_name,
+            proxy_url=proxy_url,
+            is_active=True,
+        )
+        db.add(created)
+        db.flush()
+        normalized_to_proxy[proxy_url] = created
+        configured_ids.add(created.id)
+
+    for proxy in proxies:
+        if proxy.name.startswith(ENV_PROXY_NAME_PREFIX) and proxy.id not in configured_ids:
+            proxy.is_active = False
 
 
 def init_db() -> None:
@@ -107,4 +175,6 @@ def seed_default_plans(db: Session) -> None:
         if key in existing_settings:
             continue
         db.add(AppSetting(key=key, value=default_value))
+
+    _sync_env_proxies(db)
     db.commit()

@@ -23,7 +23,7 @@ from common_data import HEADERS  # type: ignore  # noqa: E402
 from dto import AvitoConfig  # type: ignore  # noqa: E402
 from filters.ads_filter import AdsFilter  # type: ignore  # noqa: E402
 from models import ItemsResponse, Item  # type: ignore  # noqa: E402
-from app.config import BACKEND_URL, INTERNAL_API_TOKEN, PROXY_BLOCK_COOLDOWN_SECONDS, REQUEST_TIMEOUT_SEC
+from app.config import BACKEND_URL, INTERNAL_API_TOKEN, PARSER_PROXY_LIST, PROXY_BLOCK_COOLDOWN_SECONDS, REQUEST_TIMEOUT_SEC
 
 
 class AvitoAdapter:
@@ -162,9 +162,17 @@ class AvitoAdapter:
             logger.warning(f"Failed to report blocked proxy={proxy_url}: {exc}")
 
     def _proxy_candidates(self, monitoring: dict[str, Any]) -> list[str]:
-        raw_pool = monitoring.get("proxy_pool")
         candidates: list[str] = []
 
+        for raw in PARSER_PROXY_LIST:
+            normalized = self._normalize_proxy_url(raw)
+            if normalized and normalized not in candidates and not self._is_proxy_cooling_down(normalized):
+                candidates.append(normalized)
+
+        if candidates:
+            return candidates
+
+        raw_pool = monitoring.get("proxy_pool")
         if isinstance(raw_pool, list):
             for raw in raw_pool:
                 if not isinstance(raw, str):
@@ -176,11 +184,7 @@ class AvitoAdapter:
         raw_single = monitoring.get("proxy_url")
         if isinstance(raw_single, str):
             normalized_single = self._normalize_proxy_url(raw_single)
-            if (
-                normalized_single
-                and normalized_single not in candidates
-                and not self._is_proxy_cooling_down(normalized_single)
-            ):
+            if normalized_single and normalized_single not in candidates and not self._is_proxy_cooling_down(normalized_single):
                 candidates.insert(0, normalized_single)
 
         return candidates

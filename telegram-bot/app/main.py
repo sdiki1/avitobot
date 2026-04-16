@@ -53,8 +53,24 @@ BTN_START_MONITORING = "▶️ Запустить мониторинг"
 BTN_STOP_MONITORING = "⏹ Остановить мониторинг"
 BTN_STATUS = "📊 Статус"
 BTN_CHANGE_LINK = "🔗 Поменять ссылку"
-BTN_OPEN_MINIAPP = "📱 Открыть MiniApp"
+BTN_OPEN_MINIAPP = "📱 Открыть приложение"
 BTN_CANCEL_CHANGE = "✖️ Отмена изменения"
+
+START_COMMAND_TEXT = (
+    "Уважаемые пользователи. Представленное программное обеспечение предназначено для мониторинга "
+    "объявлений на платформе Авито.\n\n"
+    "Целевая аудитория приложения включает:\n"
+    "- Предпринимателей, занимающихся перепродажей товаров;\n"
+    "- Риэлторов;\n"
+    "- Пользователей, заинтересованных в поиске товаров по заданным критериям на Авито.\n\n"
+    "Сферы применения: автомобили, электроника, недвижимость, запчасти, вакансии, услуги.\n\n"
+    "Использование данного сервиса обеспечивает преимущество в скорости отклика и возможность "
+    "приобретения товаров по наиболее выгодной цене.\n\n"
+    "Программное обеспечение позволяет отслеживать новые публикации и отправлять уведомления в Telegram.\n\n"
+    "Для новых пользователей предусмотрен пробный период.\n\n"
+    "Желаете ли вы воспользоваться данным приложением? Для этого необходимо нажать кнопку "
+    "«Открыть приложение»."
+)
 
 
 def has_valid_bot_token(token: str) -> bool:
@@ -83,7 +99,7 @@ def miniapp_keyboard(telegram_id: int) -> ReplyKeyboardMarkup:
         ],
         resize_keyboard=True,
         one_time_keyboard=True,
-        input_field_placeholder="Открыть MiniApp",
+        input_field_placeholder="Открыть приложение",
     )
 
 
@@ -660,22 +676,7 @@ def build_router(bot_id: int, backend: BackendAPI, *, is_primary: bool = False) 
                 full_name=tg_user.full_name,
                 referral_code=referral_code,
             )
-            text = (
-                "Уважаемые пользователи. Представленное программное обеспечение предназначено для мониторинга "
-                "объявлений на платформе Авито.\n\n"
-                "Целевая аудитория приложения включает:\n"
-                "- Предпринимателей, занимающихся перепродажей товаров;\n"
-                "- Риэлторов;\n"
-                "- Пользователей, заинтересованных в поиске товаров по заданным критериям на Авито.\n\n"
-                "Сферы применения: автомобили, электроника, недвижимость, запчасти, вакансии, услуги.\n\n"
-                "Использование данного сервиса обеспечивает преимущество в скорости отклика и возможность "
-                "приобретения товаров по наиболее выгодной цене.\n\n"
-                "Программное обеспечение позволяет отслеживать новые публикации и отправлять уведомления в Telegram.\n\n"
-                "Для новых пользователей предусмотрен пробный период.\n\n"
-                "Желаете ли вы воспользоваться данным приложением? Для этого необходимо нажать кнопку "
-                "«Открыть приложение»."
-            )
-            await message.answer(text, reply_markup=miniapp_keyboard(tg_user.id))
+            await message.answer(START_COMMAND_TEXT, reply_markup=miniapp_keyboard(tg_user.id))
 
         @router.message(Command("plans"))
         async def cmd_plans_primary(message: Message) -> None:
@@ -683,13 +684,13 @@ def build_router(bot_id: int, backend: BackendAPI, *, is_primary: bool = False) 
 
         @router.message(Command("miniapp"))
         async def cmd_miniapp_primary(message: Message) -> None:
-            await message.answer("Откройте miniapp", reply_markup=miniapp_keyboard(message.from_user.id))
+            await message.answer("Откройте приложение", reply_markup=miniapp_keyboard(message.from_user.id))
 
         @router.message()
         async def any_message_primary(message: Message) -> None:
             await message.answer(
                 "Этот бот предназначен для старта работы.\n"
-                "Нажмите кнопку ниже, чтобы открыть MiniApp.",
+                "Нажмите кнопку ниже, чтобы открыть приложение.",
                 reply_markup=miniapp_keyboard(message.from_user.id),
             )
 
