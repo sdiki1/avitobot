@@ -66,12 +66,6 @@ const DEFAULT_MINIAPP_CONTENT = {
   ],
 }
 
-const SPEED_SURCHARGE_BY_DAYS = {
-  7: 300,
-  15: 500,
-  30: 800,
-}
-
 function getTelegramInitData() {
   const webapp = window.Telegram?.WebApp
   if (!webapp) return null
@@ -148,6 +142,47 @@ function botShortName(bot) {
   return bot?.name || 'Бот не назначен'
 }
 
+function isCurrentSubscription(subscription) {
+  const status = String(subscription?.status || '').toLowerCase()
+  if (status !== 'active') return false
+  if (!subscription?.ends_at) return true
+  const endsAtTs = new Date(subscription.ends_at).getTime()
+  if (Number.isNaN(endsAtTs)) return true
+  return endsAtTs > Date.now()
+}
+
+function getSubscriptionState(subscription) {
+  const status = String(subscription?.status || '').toLowerCase()
+  const isCurrent = isCurrentSubscription(subscription)
+  const endsAtTs = subscription?.ends_at ? new Date(subscription.ends_at).getTime() : Number.NaN
+  const endedByDate = Number.isFinite(endsAtTs) && endsAtTs <= Date.now()
+
+  if (isCurrent) {
+    if (subscription?.is_trial) return { label: 'Тест', tone: 'trial' }
+    return { label: 'Активна', tone: 'active' }
+  }
+  if (status === 'expired' || (status === 'active' && endedByDate)) {
+    return { label: 'Завершена', tone: 'expired' }
+  }
+  if (status === 'pending') return { label: 'Ожидает', tone: 'pending' }
+  return { label: status ? status.toUpperCase() : 'Неизвестно', tone: 'neutral' }
+}
+
+function subscriptionTitle(subscription) {
+  const planName = subscription?.plan_name || 'Без тарифа'
+  return subscription?.is_trial ? `${planName} (тест)` : planName
+}
+
+function normalizePlanName(value) {
+  return String(value || '').trim().toLowerCase()
+}
+
+function detectPlanType(plan) {
+  const normalized = normalizePlanName(plan?.name)
+  if (normalized.startsWith('скорост')) return 'speed'
+  return 'standard'
+}
+
 function normalizeParamFlags(monitoring) {
   return {
     photo: monitoring?.include_photo ?? true,
@@ -155,13 +190,6 @@ function normalizeParamFlags(monitoring) {
     seller: monitoring?.include_seller_info ?? true,
     price_drop: monitoring?.notify_price_drop ?? true,
   }
-}
-
-function resolveSpeedSurcharge(days) {
-  if (SPEED_SURCHARGE_BY_DAYS[days]) return SPEED_SURCHARGE_BY_DAYS[days]
-  if (Number(days) <= 7) return SPEED_SURCHARGE_BY_DAYS[7]
-  if (Number(days) <= 15) return SPEED_SURCHARGE_BY_DAYS[15]
-  return SPEED_SURCHARGE_BY_DAYS[30]
 }
 
 export default function App() {
@@ -184,12 +212,14 @@ export default function App() {
   const [trialBusy, setTrialBusy] = useState(false)
   const [saveMonitoringBusy, setSaveMonitoringBusy] = useState(false)
   const [selectedType, setSelectedType] = useState(TYPE_OPTIONS[0].id)
-  const [selectedPeriod, setSelectedPeriod] = useState(7)
   const [useReferralBalance, setUseReferralBalance] = useState(false)
   const [buyDraft, setBuyDraft] = useState({ title: '', url: '' })
 
   useEffect(() => {
-    window.Telegram?.WebApp?.ready?.()
+    if (window.Telegram && window.Telegram.WebApp) {
+      window.Telegram.WebApp.ready?.()
+      window.Telegram.WebApp.expand()
+    }
   }, [])
 
   const normalizedMonitorings = useMemo(() => {
@@ -220,30 +250,17 @@ export default function App() {
     [normalizedMonitorings, selectedMonitoringId],
   )
 
-  const periodOptions = useMemo(() => {
-    const daysFromPlans = plans.map((plan) => Number(plan.duration_days)).filter(Boolean)
-    const merged = Array.from(new Set([7, 15, 30, ...daysFromPlans])).sort((a, b) => a - b)
-    return merged.length > 0 ? merged : [7, 15, 30]
-  }, [plans])
-
-  useEffect(() => {
-    if (periodOptions.length > 0 && !periodOptions.includes(Number(selectedPeriod))) {
-      setSelectedPeriod(periodOptions[0])
-    }
-  }, [periodOptions, selectedPeriod])
-
   const selectedPlan = useMemo(() => {
-    const byDuration = plans
-      .filter((plan) => Number(plan.duration_days) === Number(selectedPeriod))
-      .sort((a, b) => Number(a.price_rub) - Number(b.price_rub))
-    if (byDuration.length > 0) return byDuration[0]
+    const byType = plans
+      .filter((plan) => detectPlanType(plan) === selectedType)
+      .sort((a, b) => Number(a.id || 0) - Number(b.id || 0))
+    if (byType.length > 0) return byType[0]
     return plans[0] || null
-  }, [plans, selectedPeriod])
+  }, [plans, selectedType])
 
   const referralBalance = profile?.user?.referral_balance_rub ?? 0
-  const speedSurcharge = selectedType === 'speed' ? resolveSpeedSurcharge(Number(selectedPeriod)) : 0
   const basePrice = Number(selectedPlan?.price_rub || 0)
-  const totalBeforeReferral = Math.max(0, basePrice + speedSurcharge)
+  const totalBeforeReferral = Math.max(0, basePrice)
   const totalPrice = Math.max(0, totalBeforeReferral - (useReferralBalance ? referralBalance : 0))
 
   const loadData = async (tgId) => {
@@ -419,7 +436,6 @@ export default function App() {
       const result = await purchaseSubscription({
         telegram_id: Number(telegramId),
         plan_id: Number(selectedPlan.id),
-        duration_days: Number(selectedPeriod),
         subscription_type: selectedType,
         use_referral_balance: useReferralBalance,
         monitoring_id:
@@ -527,6 +543,15 @@ export default function App() {
     : DEFAULT_PARAM_FLAGS
 
   const detailBotLink = selectedMonitoring ? buildSubscriptionBotLink(selectedMonitoring.bot) : null
+  const profileSubscriptions = Array.isArray(profile?.subscriptions) ? profile.subscriptions : []
+  const profileCurrentSubscriptions = profileSubscriptions.filter((item) => isCurrentSubscription(item))
+  const fallbackCurrentSubscriptions =
+    profileCurrentSubscriptions.length > 0
+      ? profileCurrentSubscriptions
+      : profile?.subscription
+        ? [profile.subscription]
+        : []
+  const assignedBots = Array.isArray(profile?.assigned_bots) ? profile.assigned_bots : []
 
   return (
     <div className="app-root">
@@ -719,21 +744,6 @@ export default function App() {
                 ))}
               </div>
 
-              <h2 className="section-title">Период подписки</h2>
-              <div className="choices-list">
-                {periodOptions.map((days) => (
-                  <button
-                    key={days}
-                    type="button"
-                    className={`choice-row ${Number(selectedPeriod) === Number(days) ? 'active' : ''}`}
-                    onClick={() => setSelectedPeriod(Number(days))}
-                  >
-                    <span className="choice-dot" />
-                    <span className="choice-main">{days} дней</span>
-                  </button>
-                ))}
-              </div>
-
               <h2 className="section-title">Настройки подписки</h2>
               <input
                 type="text"
@@ -754,8 +764,9 @@ export default function App() {
               <p className="hint-text">Укажите поисковую URL-ссылку на список объявлений из адресной строки браузера.</p>
 
               <div className="buy-summary">
-                <div className="summary-balance">База: {basePrice}₽</div>
-                {selectedType === 'speed' && <div className="summary-balance">Скоростная наценка: +{speedSurcharge}₽</div>}
+                <div className="summary-balance">Тариф: {selectedPlan?.name || '—'}</div>
+                <div className="summary-balance">Срок: {selectedPlan?.duration_days ?? 0} дней</div>
+                <div className="summary-balance">Цена тарифа: {basePrice}₽</div>
                 <div className="summary-total">Итог: {totalPrice}₽</div>
                 <div className="summary-balance">Реф. баланс: {referralBalance}₽</div>
                 <button
@@ -822,42 +833,93 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="profile-row">
-                  <span>Текущая подписка</span>
-                  <div>
-                    <strong>
-                      {profile?.subscription
-                        ? `${profile.subscription.plan_name}${profile.subscription.is_trial ? ' (тест)' : ''} до ${formatDateTime(profile.subscription.ends_at)}`
-                        : 'Нет активной'}
-                    </strong>
-                  </div>
+                <div className="profile-section">
+                  <span className="profile-section-title">Текущие подписки</span>
+                  {fallbackCurrentSubscriptions.length > 0 ? (
+                    <div className="profile-subscriptions-grid">
+                      {fallbackCurrentSubscriptions.map((sub, index) => {
+                        const state = getSubscriptionState(sub)
+                        return (
+                          <article className="profile-subscription-card" key={sub?.id || `current-${index}`}>
+                            <div className="profile-subscription-head">
+                              <strong>{subscriptionTitle(sub)}</strong>
+                              <span className={`profile-subscription-badge ${state.tone}`}>{state.label}</span>
+                            </div>
+                            <div className="profile-subscription-meta">
+                              <span>До: {formatDateTime(sub?.ends_at)}</span>
+                              <span>Лимит: {sub?.links_limit ?? 0}</span>
+                              {typeof sub?.amount_paid === 'number' && <span>Оплата: {sub.amount_paid} ₽</span>}
+                            </div>
+                          </article>
+                        )
+                      })}
+                    </div>
+                  ) : (
+                    <div className="profile-empty-card">Нет активных подписок</div>
+                  )}
                 </div>
 
-                <div className="profile-row">
-                  <span>Все подписки</span>
-                  <div>
-                    <strong>
-                      {Array.isArray(profile?.subscriptions) && profile.subscriptions.length > 0
-                        ? profile.subscriptions
-                            .map(
-                              (sub) =>
-                                `${sub.plan_name}${sub.is_trial ? ' (тест)' : ''} до ${formatDateTime(sub.ends_at)}`,
-                            )
-                            .join(' | ')
-                        : 'Нет подписок'}
-                    </strong>
-                  </div>
+                <div className="profile-section">
+                  <span className="profile-section-title">Все подписки</span>
+                  {profileSubscriptions.length > 0 ? (
+                    <div className="profile-subscriptions-grid">
+                      {profileSubscriptions.map((sub, index) => {
+                        const state = getSubscriptionState(sub)
+                        return (
+                          <article className="profile-subscription-card" key={sub?.id || `all-${index}`}>
+                            <div className="profile-subscription-head">
+                              <strong>{subscriptionTitle(sub)}</strong>
+                              <span className={`profile-subscription-badge ${state.tone}`}>{state.label}</span>
+                            </div>
+                            <div className="profile-subscription-meta">
+                              <span>Начало: {formatDateTime(sub?.started_at)}</span>
+                              <span>До: {formatDateTime(sub?.ends_at)}</span>
+                              <span>Лимит: {sub?.links_limit ?? 0}</span>
+                              <span>Оплата: {sub?.amount_paid ?? 0} ₽</span>
+                            </div>
+                          </article>
+                        )
+                      })}
+                    </div>
+                  ) : (
+                    <div className="profile-empty-card">Нет подписок</div>
+                  )}
                 </div>
 
-                <div className="profile-row">
-                  <span>Назначенные боты</span>
-                  <div>
-                    <strong>
-                      {Array.isArray(profile?.assigned_bots) && profile.assigned_bots.length > 0
-                        ? profile.assigned_bots.map((bot) => botShortName(bot)).join(', ')
-                        : '—'}
-                    </strong>
-                  </div>
+                <div className="profile-section">
+                  <span className="profile-section-title">Назначенные боты</span>
+                  {assignedBots.length > 0 ? (
+                    <div className="profile-bots-grid">
+                      {assignedBots.map((bot, index) => {
+                        const botLink = buildSubscriptionBotLink(bot) || bot?.bot_link || null
+                        return (
+                          <button
+                            key={bot?.id || `bot-${index}`}
+                            type="button"
+                            className={`profile-bot-card ${botLink ? '' : 'disabled'}`}
+                            onClick={() => {
+                              if (!botLink) {
+                                setStatusMessage('Для этого бота ссылка недоступна')
+                                return
+                              }
+                              openExternal(botLink)
+                            }}
+                          >
+                            <span className="profile-bot-main">
+                              <strong>{bot?.name || 'Бот'}</strong>
+                              <span>{botShortName(bot)}</span>
+                            </span>
+                            <span className="profile-bot-open">{botLink ? 'Открыть' : 'Недоступно'}</span>
+                            <span className="profile-bot-chevron">
+                              <IconChevron />
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  ) : (
+                    <div className="profile-empty-card">Назначенных ботов нет</div>
+                  )}
                 </div>
               </div>
             </section>

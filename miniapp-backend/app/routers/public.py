@@ -31,7 +31,6 @@ from app.services.helpers import (
     get_miniapp_content_settings,
     get_active_subscription_query,
     get_available_bot_for_user,
-    get_speed_surcharge_rub,
     get_or_create_user,
     normalize_monitoring_url,
     parse_miniapp_auth_token,
@@ -584,17 +583,8 @@ def purchase_subscription(
     current_total_slots = db.scalar(select(func.count(Monitoring.id)).where(Monitoring.user_id == user.id)) or 0
     target_total_slots = current_total_slots + slots_to_add
 
-    subscription_type = (payload.subscription_type or "standard").strip().lower()
-    if subscription_type not in {"standard", "speed"}:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Неверный тип подписки")
-
-    selected_duration_days = int(payload.duration_days or plan.duration_days)
-    if selected_duration_days <= 0:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Некорректный срок подписки")
-
     base_price = max(0, int(plan.price_rub))
-    speed_surcharge = get_speed_surcharge_rub(selected_duration_days) if subscription_type == "speed" else 0
-    total_price = max(0, base_price + speed_surcharge)
+    total_price = max(0, base_price)
 
     referral_used = 0
     if payload.use_referral_balance:
@@ -603,7 +593,8 @@ def purchase_subscription(
         user.referral_balance_rub = current_balance - referral_used
 
     amount_to_pay = max(0, total_price - referral_used)
-    provider = "miniapp_speed" if subscription_type == "speed" else "miniapp_standard"
+    plan_name_normalized = (plan.name or "").strip().lower()
+    provider = "miniapp_speed" if plan_name_normalized.startswith("скорост") else "miniapp_standard"
     if referral_used > 0:
         provider = f"{provider}_with_ref"
 
@@ -614,11 +605,11 @@ def purchase_subscription(
         status="completed",
         provider=provider,
         payload={
-            "subscription_type": subscription_type,
-            "duration_days": selected_duration_days,
+            "subscription_type": "speed" if provider.startswith("miniapp_speed") else "standard",
+            "duration_days": int(plan.duration_days),
             "monitoring_id": target_monitoring.id if target_monitoring else None,
             "base_price_rub": base_price,
-            "speed_surcharge_rub": speed_surcharge,
+            "speed_surcharge_rub": 0,
             "total_price_rub": total_price,
             "referral_used_rub": referral_used,
             "monitoring_title": payload.monitoring_title,
@@ -630,7 +621,6 @@ def purchase_subscription(
         db,
         user.id,
         plan,
-        duration_days_override=selected_duration_days,
         amount_paid_override=amount_to_pay,
         is_trial=False,
     )
@@ -665,7 +655,6 @@ def purchase_subscription(
             "💳 Покупка подписки\n"
             f"Пользователь: {user.telegram_id}\n"
             f"Тариф: {plan.name}\n"
-            f"Тип: {'Скоростная' if subscription_type == 'speed' else 'Стандартная'}\n"
             f"Сумма: {amount_to_pay} ₽\n"
             f"Списано с реф. баланса: {referral_used} ₽\n"
             f"Начислено рефереру: {reward} ₽"

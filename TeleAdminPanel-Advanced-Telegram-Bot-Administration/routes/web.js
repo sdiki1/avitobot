@@ -34,7 +34,7 @@ const MINIAPP_PLAN_DEFINITIONS = [
     key: 'speed',
     name: 'Скоростная',
     defaults: {
-      description: 'Скоростная подписка (наценка по сроку применяется в miniapp)',
+      description: 'Скоростная подписка',
       links_limit: 1,
       duration_days: 30,
       price_rub: 500,
