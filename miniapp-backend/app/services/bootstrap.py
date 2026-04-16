@@ -151,17 +151,41 @@ def seed_default_plans(db: Session) -> None:
         db.add(TariffPlan(**plan))
 
     default_token = (settings.default_bot_token or "").strip()
+    default_name = (settings.default_bot_name or "Основной бот").strip() or "Основной бот"
     if default_token and default_token != "change_me_telegram_bot_token":
-        existing_bot = db.scalar(select(TelegramBot).where(TelegramBot.bot_token == default_token))
-        if not existing_bot:
-            db.add(
-                TelegramBot(
-                    name=settings.default_bot_name,
-                    bot_token=default_token,
-                    is_active=True,
-                    is_primary=True,
+        existing_by_token = db.scalar(select(TelegramBot).where(TelegramBot.bot_token == default_token))
+        if existing_by_token:
+            existing_by_token.is_active = True
+            if existing_by_token.name != default_name:
+                duplicate_name = db.scalar(
+                    select(TelegramBot.id).where(
+                        TelegramBot.name == default_name,
+                        TelegramBot.id != existing_by_token.id,
+                    )
                 )
-            )
+                if not duplicate_name:
+                    existing_by_token.name = default_name
+        else:
+            existing_by_name = db.scalar(select(TelegramBot).where(TelegramBot.name == default_name))
+            if existing_by_name:
+                duplicate_token = db.scalar(
+                    select(TelegramBot.id).where(
+                        TelegramBot.bot_token == default_token,
+                        TelegramBot.id != existing_by_name.id,
+                    )
+                )
+                if not duplicate_token:
+                    existing_by_name.bot_token = default_token
+                existing_by_name.is_active = True
+            else:
+                db.add(
+                    TelegramBot(
+                        name=default_name,
+                        bot_token=default_token,
+                        is_active=True,
+                        is_primary=True,
+                    )
+                )
 
     trial_setting = db.scalar(select(AppSetting).where(AppSetting.key == TRIAL_DAYS_SETTING_KEY))
     if not trial_setting:

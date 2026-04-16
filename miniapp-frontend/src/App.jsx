@@ -76,30 +76,8 @@ function getTelegramInitData() {
   const webapp = window.Telegram?.WebApp
   if (!webapp) return null
   webapp.ready()
-  webapp.expand?.()
-  webapp.disableVerticalSwipes?.()
-  try {
-    const maybePromise = webapp.requestFullscreen?.()
-    if (maybePromise && typeof maybePromise.catch === 'function') maybePromise.catch(() => {})
-  } catch {
-    // ignore: not supported in some Telegram clients
-  }
   if (!webapp.initData || typeof webapp.initData !== 'string') return null
   return webapp.initData
-}
-
-function forceTelegramFullscreen() {
-  const webapp = window.Telegram?.WebApp
-  if (!webapp) return
-  webapp.ready?.()
-  webapp.expand?.()
-  webapp.disableVerticalSwipes?.()
-  try {
-    const maybePromise = webapp.requestFullscreen?.()
-    if (maybePromise && typeof maybePromise.catch === 'function') maybePromise.catch(() => {})
-  } catch {
-    // ignore: not supported in some Telegram clients
-  }
 }
 
 function getAuthTokenFromQuery() {
@@ -211,23 +189,7 @@ export default function App() {
   const [buyDraft, setBuyDraft] = useState({ title: '', url: '' })
 
   useEffect(() => {
-    forceTelegramFullscreen()
-
-    const retryFast = window.setTimeout(forceTelegramFullscreen, 250)
-    const retrySlow = window.setTimeout(forceTelegramFullscreen, 1200)
-
-    const onFirstInteraction = () => {
-      forceTelegramFullscreen()
-    }
-    window.addEventListener('touchstart', onFirstInteraction, { passive: true, once: true })
-    window.addEventListener('mousedown', onFirstInteraction, { passive: true, once: true })
-
-    return () => {
-      window.clearTimeout(retryFast)
-      window.clearTimeout(retrySlow)
-      window.removeEventListener('touchstart', onFirstInteraction)
-      window.removeEventListener('mousedown', onFirstInteraction)
-    }
+    window.Telegram?.WebApp?.ready?.()
   }, [])
 
   const normalizedMonitorings = useMemo(() => {
