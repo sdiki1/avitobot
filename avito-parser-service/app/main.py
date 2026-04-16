@@ -51,8 +51,9 @@ def process_monitoring(mon: dict[str, Any]) -> tuple[int, str, int, dict[str, An
 
 def main() -> None:
     logger.info("Avito parser worker started")
-    if PARSER_PROXY_LIST:
-        logger.info("Proxy list loaded from env: {}", len(PARSER_PROXY_LIST))
+    if not PARSER_PROXY_LIST:
+        raise RuntimeError("PARSER_PROXY_LIST is empty. Parser traffic via Avito proxies is required")
+    logger.info("Proxy list loaded from env: {}", len(PARSER_PROXY_LIST))
 
     while True:
         cycle_started = time.time()

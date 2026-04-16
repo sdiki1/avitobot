@@ -72,7 +72,7 @@ cp .env.example .env
 2. Заполнить `BOT_TOKEN` и токены `INTERNAL_API_TOKEN`/`ADMIN_API_TOKEN`.
    - `BACKEND_URL` — URL backend для запуска компонентов вне Docker (по умолчанию `http://localhost:8001`).
    - `INTERNAL_BACKEND_URL` — URL backend внутри Docker-сети (по умолчанию `http://miniapp-backend:8000`).
-   - `PARSER_PROXY_LIST` — список прокси для парсера через запятую (например `http://user:pass@host1:port1,http://user:pass@host2:port2`). Если заполнен, парсер использует этот список в приоритете.
+   - `PARSER_PROXY_LIST` — список прокси для парсера через запятую (например `http://user:pass@host1:port1,http://user:pass@host2:port2`). Парсер использует только этот список для запросов к Avito.
    - Для Mini App auth через Telegram `initData` задайте:
      - `MINIAPP_ACCESS_TOKEN_SECRET`
      - `MINIAPP_REFRESH_TOKEN_SECRET`
@@ -86,7 +86,7 @@ docker compose up --build
 - API: `http://localhost/api/...`
 - Admin: `http://localhost/admin/`
 
-`PARSER_PROXY_LIST` автоматически синхронизируется в backend как активные прокси (`env-proxy-*`), поэтому их статус виден в админке в разделе прокси и на дашборде.
+Прокси в админке можно добавлять и редактировать как обычно, но трафик парсера Avito идет только через `PARSER_PROXY_LIST` из `.env`.
 
 ## Phase checklist
 - [x] Этап 1: инфраструктура Docker + nginx + БД
