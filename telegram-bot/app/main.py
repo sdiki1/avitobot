@@ -21,6 +21,8 @@ from aiogram.exceptions import TelegramRetryAfter
 from aiogram.types import (
     BufferedInputFile,
     BotCommand,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
     KeyboardButton,
     Message,
     ReplyKeyboardMarkup,
@@ -92,14 +94,11 @@ def redis_queue_key_for_bot(bot_id: int) -> str:
     return f"{REDIS_NOTIFY_QUEUE_PREFIX}{int(bot_id)}"
 
 
-def miniapp_keyboard(telegram_id: int) -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text=BTN_OPEN_MINIAPP, web_app=WebAppInfo(url=build_miniapp_url(telegram_id)))],
-        ],
-        resize_keyboard=True,
-        one_time_keyboard=True,
-        input_field_placeholder="Открыть приложение",
+def miniapp_keyboard(telegram_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=BTN_OPEN_MINIAPP, web_app=WebAppInfo(url=build_miniapp_url(telegram_id)))],
+        ]
     )
 
 
