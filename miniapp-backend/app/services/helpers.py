@@ -461,6 +461,19 @@ def send_subscription_assigned_bot_message(db: Session, user: User) -> bool:
     return _send_telegram_message(primary_bot.bot_token, user.telegram_id, text)
 
 
+def send_monitoring_bot_message(db: Session, monitoring: Monitoring, telegram_id: int, text: str) -> bool:
+    if not monitoring.bot_id or not text or not text.strip():
+        return False
+
+    bot = monitoring.bot if monitoring.bot and monitoring.bot.id == monitoring.bot_id else None
+    if not bot:
+        bot = db.get(TelegramBot, monitoring.bot_id)
+    if not bot or not bot.bot_token:
+        return False
+
+    return _send_telegram_message(bot.bot_token, telegram_id, text)
+
+
 def seconds_to_human(delta_seconds: int) -> str:
     if delta_seconds <= 0:
         return "0с"

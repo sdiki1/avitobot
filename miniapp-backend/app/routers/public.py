@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from sqlalchemy import and_, desc, func, select
+from sqlalchemy import and_, desc, func, select, update
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -33,11 +33,14 @@ from app.services.helpers import (
     get_available_bot_for_user,
     get_or_create_user,
     normalize_monitoring_url,
+    now_utc,
     parse_miniapp_auth_token,
     reward_referrer_for_payment,
     send_admin_event_message,
+    send_monitoring_bot_message,
     send_subscription_assigned_bot_message,
 )
+from app.services.notification_queue import purge_monitoring_notifications
 from app.services.miniapp_auth import (
     assert_telegram_id_match,
     clear_miniapp_session,
@@ -486,6 +489,11 @@ def update_monitoring(
     )
     if not monitoring:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Monitoring not found")
+    was_active = bool(monitoring.is_active)
+    prev_include_photo = bool(monitoring.include_photo)
+    prev_include_description = bool(monitoring.include_description)
+    prev_include_seller_info = bool(monitoring.include_seller_info)
+    prev_notify_price_drop = bool(monitoring.notify_price_drop)
 
     if payload.title is not None:
         monitoring.title = payload.title.strip() or monitoring.title
@@ -514,6 +522,42 @@ def update_monitoring(
 
     db.commit()
     db.refresh(monitoring)
+
+    settings_changed = any(
+        [
+            payload.include_photo is not None and bool(payload.include_photo) != prev_include_photo,
+            payload.include_description is not None and bool(payload.include_description) != prev_include_description,
+            payload.include_seller_info is not None and bool(payload.include_seller_info) != prev_include_seller_info,
+            payload.notify_price_drop is not None and bool(payload.notify_price_drop) != prev_notify_price_drop,
+        ]
+    )
+
+    if settings_changed:
+        db.execute(
+            update(Notification)
+            .where(
+                and_(
+                    Notification.monitoring_id == monitoring.id,
+                    Notification.status == "pending",
+                )
+            )
+            .values(
+                status="sent",
+                sent_at=now_utc(),
+            )
+        )
+        db.commit()
+        if monitoring.bot_id:
+            purge_monitoring_notifications(int(monitoring.bot_id), int(monitoring.id))
+
+    if was_active and not monitoring.is_active and payload.is_active is False:
+        title = (monitoring.title or f"Мониторинг #{monitoring.id}").strip()
+        message = (
+            f"⏹ Мониторинг «{title}» остановлен через MiniApp.\n"
+            "Для возобновления используйте команду /start_monitoring."
+        )
+        send_monitoring_bot_message(db, monitoring, auth_user.telegram_id, message)
+
     return _monitoring_to_schema(monitoring)
 
 

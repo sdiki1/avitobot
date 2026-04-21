@@ -211,6 +211,7 @@ export default function App() {
   const [purchaseBusy, setPurchaseBusy] = useState(false)
   const [trialBusy, setTrialBusy] = useState(false)
   const [saveMonitoringBusy, setSaveMonitoringBusy] = useState(false)
+  const [stopMonitoringBusy, setStopMonitoringBusy] = useState(false)
   const [selectedType, setSelectedType] = useState(TYPE_OPTIONS[0].id)
   const [useReferralBalance, setUseReferralBalance] = useState(false)
   const [buyDraft, setBuyDraft] = useState({ title: '', url: '' })
@@ -501,6 +502,28 @@ export default function App() {
     }
   }
 
+  const stopSelectedMonitoring = async () => {
+    if (!telegramId || !selectedMonitoring || selectedMonitoring.virtual || stopMonitoringBusy) return
+    if (!selectedMonitoring.is_active) {
+      setStatusMessage('Мониторинг уже остановлен')
+      return
+    }
+    try {
+      setStopMonitoringBusy(true)
+      await updateMonitoring(selectedMonitoring.id, {
+        telegram_id: Number(telegramId),
+        is_active: false,
+      })
+      await loadData(telegramId)
+      setStatusMessage('Мониторинг остановлен')
+    } catch (error) {
+      const detail = error?.response?.data?.detail || error?.message || 'Ошибка остановки мониторинга'
+      setStatusMessage(`Ошибка: ${detail}`)
+    } finally {
+      setStopMonitoringBusy(false)
+    }
+  }
+
   const updateSelectedDraft = (patch) => {
     if (!selectedMonitoring) return
     setDrafts((prev) => ({
@@ -680,10 +703,25 @@ export default function App() {
                     type="button"
                     className="secondary-btn"
                     onClick={saveMonitoringSettings}
-                    disabled={selectedMonitoring.virtual || saveMonitoringBusy}
+                    disabled={selectedMonitoring.virtual || saveMonitoringBusy || stopMonitoringBusy}
                   >
                     {saveMonitoringBusy ? 'Сохранение...' : 'Сохранить настройки'}
                   </button>
+
+                  {!selectedMonitoring.virtual && (
+                    <button
+                      type="button"
+                      className="danger-btn"
+                      onClick={stopSelectedMonitoring}
+                      disabled={stopMonitoringBusy || saveMonitoringBusy || !selectedMonitoring.is_active}
+                    >
+                      {stopMonitoringBusy
+                        ? 'Останавливаем...'
+                        : selectedMonitoring.is_active
+                          ? 'Остановить мониторинг'
+                          : 'Мониторинг остановлен'}
+                    </button>
+                  )}
 
                   <p className="hint-text">
                     Перед первым запуском не забудь{' '}

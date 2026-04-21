@@ -195,7 +195,8 @@ a {
 }
 
 .primary-btn,
-.secondary-btn {
+.secondary-btn,
+.danger-btn {
   width: 100%;
   border: 0;
   border-radius: 18px;
@@ -227,6 +228,17 @@ a {
   border: 1px solid var(--line);
   background: #130f1f;
   color: #f2f6ff;
+}
+
+.danger-btn {
+  border: 1px solid #5a2332;
+  background: #2b0f18;
+  color: #ffdce4;
+}
+
+.danger-btn:disabled {
+  opacity: 0.7;
+  cursor: default;
 }
 
 .dark-input {

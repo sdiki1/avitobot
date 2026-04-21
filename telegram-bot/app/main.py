@@ -5,6 +5,7 @@ from collections import deque
 from datetime import datetime, timedelta, timezone
 import json
 import os
+from pathlib import Path
 import re
 from contextlib import suppress
 from dataclasses import dataclass
@@ -21,6 +22,7 @@ from aiogram.exceptions import TelegramRetryAfter
 from aiogram.types import (
     BufferedInputFile,
     BotCommand,
+    FSInputFile,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     KeyboardButton,
@@ -73,6 +75,15 @@ START_COMMAND_TEXT = (
     "Желаете ли вы воспользоваться данным приложением? Для этого необходимо нажать кнопку "
     "«Открыть приложение»."
 )
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+STATIC_MESSAGE_PHOTOS = {
+    "error": PROJECT_ROOT / "msg_error.jpeg",
+    "link_change": PROJECT_ROOT / "msg_link_change.jpeg",
+    "monitoring_start": PROJECT_ROOT / "msg_monitoring_start.jpeg",
+    "monitoring_stop": PROJECT_ROOT / "msg_monitoring_stop.png",
+}
+_logged_missing_static_photo_keys: set[str] = set()
 
 
 def has_valid_bot_token(token: str) -> bool:
@@ -196,6 +207,51 @@ def _fit_photo_caption(value: str, max_len: int = 1024) -> str:
     if len(plain_text) <= max_len:
         return plain_text
     return f"{plain_text[: max_len - 1]}…"
+
+
+def _resolve_static_photo_path(photo_key: str | None) -> Path | None:
+    if not photo_key:
+        return None
+    path = STATIC_MESSAGE_PHOTOS.get(photo_key)
+    if not path or path.exists():
+        return path
+
+    if photo_key not in _logged_missing_static_photo_keys:
+        _logged_missing_static_photo_keys.add(photo_key)
+        logger.warning("Static photo for key='{}' not found at path='{}'", photo_key, path)
+    return None
+
+
+async def _answer_with_static_photo(
+    message: Message,
+    text: str,
+    *,
+    photo_key: str | None = None,
+    reply_markup: Any = None,
+    disable_web_page_preview: bool = False,
+) -> None:
+    photo_path = _resolve_static_photo_path(photo_key)
+    if photo_path:
+        try:
+            await message.answer_photo(
+                photo=FSInputFile(str(photo_path)),
+                caption=_fit_photo_caption(text),
+                reply_markup=reply_markup,
+            )
+            if len((text or "").strip()) > 1024:
+                await message.answer(
+                    text,
+                    disable_web_page_preview=disable_web_page_preview,
+                )
+            return
+        except Exception as exc:
+            logger.warning("Failed to send static photo key='{}' path='{}': {}", photo_key, photo_path, exc)
+
+    await message.answer(
+        text,
+        reply_markup=reply_markup,
+        disable_web_page_preview=disable_web_page_preview,
+    )
 
 
 async def _pin_monitoring_link(bot: Bot, chat_id: int, monitoring_url: str) -> None:
@@ -703,35 +759,45 @@ def build_router(bot_id: int, backend: BackendAPI, *, is_primary: bool = False) 
                 reply_markup=monitoring_actions_keyboard(message.from_user.id),
             )
             return
-        await message.answer(
+        await _answer_with_static_photo(
+            message,
             f"Не удалось получить статус: {_extract_error(payload)}",
+            photo_key="error",
             reply_markup=monitoring_actions_keyboard(message.from_user.id),
         )
 
     async def _start_monitoring(message: Message) -> None:
         status_code, payload = await backend.start_monitoring(bot_id=bot_id, telegram_id=message.from_user.id)
         if status_code == 200:
-            await message.answer(
+            await _answer_with_static_photo(
+                message,
                 f"Мониторинг запущен.\n\n{_format_monitoring_status(payload)}",
+                photo_key="monitoring_start",
                 reply_markup=monitoring_actions_keyboard(message.from_user.id),
             )
             await _pin_monitoring_link(message.bot, chat_id=message.from_user.id, monitoring_url=payload.get("url"))
             return
-        await message.answer(
+        await _answer_with_static_photo(
+            message,
             f"Не удалось запустить: {_extract_error(payload)}",
+            photo_key="error",
             reply_markup=monitoring_actions_keyboard(message.from_user.id),
         )
 
     async def _stop_monitoring(message: Message) -> None:
         status_code, payload = await backend.stop_monitoring(bot_id=bot_id, telegram_id=message.from_user.id)
         if status_code == 200:
-            await message.answer(
+            await _answer_with_static_photo(
+                message,
                 f"Мониторинг остановлен.\n\n{_format_monitoring_status(payload)}",
+                photo_key="monitoring_stop",
                 reply_markup=monitoring_actions_keyboard(message.from_user.id),
             )
             return
-        await message.answer(
+        await _answer_with_static_photo(
+            message,
             f"Не удалось остановить: {_extract_error(payload)}",
+            photo_key="error",
             reply_markup=monitoring_actions_keyboard(message.from_user.id),
         )
 
@@ -742,24 +808,30 @@ def build_router(bot_id: int, backend: BackendAPI, *, is_primary: bool = False) 
             url=url,
         )
         if status_code == 200:
-            await message.answer(
+            await _answer_with_static_photo(
+                message,
                 "Ссылка обновлена.\n"
                 f"{_format_monitoring_status(payload)}\n\n"
                 "Для запуска используйте кнопку «Запустить мониторинг».",
+                photo_key="link_change",
                 reply_markup=monitoring_actions_keyboard(message.from_user.id),
             )
             await _pin_monitoring_link(message.bot, chat_id=message.from_user.id, monitoring_url=payload.get("url"))
             return True
-        await message.answer(
+        await _answer_with_static_photo(
+            message,
             f"Не удалось изменить ссылку: {_extract_error(payload)}",
+            photo_key="error",
             reply_markup=monitoring_actions_keyboard(message.from_user.id),
         )
         return False
 
     async def _prompt_change_link(message: Message, state: FSMContext) -> None:
         await state.set_state(LinkChangeState.waiting_url)
-        await message.answer(
+        await _answer_with_static_photo(
+            message,
             "Отправьте новую ссылку на мониторинг (начинается с http:// или https://).",
+            photo_key="link_change",
             reply_markup=monitoring_actions_keyboard(message.from_user.id, include_cancel=True),
         )
 
@@ -811,8 +883,10 @@ def build_router(bot_id: int, backend: BackendAPI, *, is_primary: bool = False) 
                         reply_markup=monitoring_actions_keyboard(tg_user.id),
                     )
                     return
-                await message.answer(
+                await _answer_with_static_photo(
+                    message,
                     f"Не удалось получить данные подписки: {_extract_error(payload)}",
+                    photo_key="error",
                     reply_markup=monitoring_actions_keyboard(tg_user.id),
                 )
                 return
@@ -839,7 +913,12 @@ def build_router(bot_id: int, backend: BackendAPI, *, is_primary: bool = False) 
             )
         else:
             text = f"Не удалось получить мониторинг: {_extract_error(payload)}"
-        await message.answer(text, reply_markup=monitoring_actions_keyboard(tg_user.id))
+        await _answer_with_static_photo(
+            message,
+            text,
+            photo_key="error" if text.startswith("Не удалось") else None,
+            reply_markup=monitoring_actions_keyboard(tg_user.id),
+        )
 
     @router.message(Command("plans"))
     async def cmd_plans(message: Message) -> None:
@@ -865,8 +944,10 @@ def build_router(bot_id: int, backend: BackendAPI, *, is_primary: bool = False) 
             return
         url = parts[1].strip()
         if not _looks_like_url(url):
-            await message.answer(
+            await _answer_with_static_photo(
+                message,
                 "Ссылка должна начинаться с http:// или https://",
+                photo_key="link_change",
                 reply_markup=monitoring_actions_keyboard(message.from_user.id),
             )
             return
@@ -878,14 +959,18 @@ def build_router(bot_id: int, backend: BackendAPI, *, is_primary: bool = False) 
         value = (message.text or "").strip()
         if value == BTN_CANCEL_CHANGE:
             await state.clear()
-            await message.answer(
+            await _answer_with_static_photo(
+                message,
                 "Изменение ссылки отменено.",
+                photo_key="link_change",
                 reply_markup=monitoring_actions_keyboard(message.from_user.id),
             )
             return
         if not _looks_like_url(value):
-            await message.answer(
+            await _answer_with_static_photo(
+                message,
                 "Нужна ссылка формата https://... Повторите ввод или нажмите «Отмена изменения».",
+                photo_key="link_change",
                 reply_markup=monitoring_actions_keyboard(message.from_user.id, include_cancel=True),
             )
             return
