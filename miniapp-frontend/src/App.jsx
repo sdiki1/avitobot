@@ -684,7 +684,6 @@ export default function App() {
         ? [profile.subscription]
         : []
   const assignedBots = Array.isArray(profile?.assigned_bots) ? profile.assigned_bots : []
-  const activeMonitoringsCount = normalizedMonitorings.filter((item) => item.is_active).length
 
   return (
     <div className="app-root">
@@ -716,68 +715,33 @@ export default function App() {
             <section className="screen-block screen-subscriptions-home">
               <h1 className="screen-title">{miniappContent?.subscriptions_title || 'Подписки'}</h1>
 
-              <div className="subscription-overview">
-                <span className="subscription-overview-pill">Активных подписок: {fallbackCurrentSubscriptions.length}</span>
-                <span className="subscription-overview-pill">Активных мониторингов: {activeMonitoringsCount}</span>
-              </div>
+              <div className="subscription-list">
+                {normalizedMonitorings.length === 0 && (
+                  <div className="empty-card">У вас пока нет мониторингов. Нажмите «Купить подписку».</div>
+                )}
 
-              <div className="subscription-home-sections">
-                <div className="profile-section">
-                  <span className="profile-section-title">Активные подписки</span>
-                  {fallbackCurrentSubscriptions.length > 0 ? (
-                    <div className="profile-subscriptions-grid">
-                      {fallbackCurrentSubscriptions.map((sub, index) => {
-                        const state = getSubscriptionState(sub)
-                        return (
-                          <article className="profile-subscription-card" key={sub?.id || `home-current-${index}`}>
-                            <div className="profile-subscription-head">
-                              <strong>{subscriptionTitle(sub)}</strong>
-                              <span className={`profile-subscription-badge ${state.tone}`}>{state.label}</span>
-                            </div>
-                            <div className="profile-subscription-meta">
-                              <span>До: {formatDateTime(sub?.ends_at)}</span>
-                              <span>Лимит: {sub?.links_limit ?? 0}</span>
-                            </div>
-                          </article>
-                        )
-                      })}
-                    </div>
-                  ) : (
-                    <div className="profile-empty-card">Нет активных подписок</div>
-                  )}
-                </div>
+                {normalizedMonitorings.map((monitoring) => (
+                  <button
+                    key={monitoring.uid}
+                    type="button"
+                    className="subscription-card"
+                    onClick={() => openSubscriptionDetails(monitoring)}
+                  >
+                    <span className="subscription-avatar">◉</span>
 
-                <div className="profile-section">
-                  <span className="profile-section-title">Мониторинги</span>
-                  <div className="subscription-list">
-                    {normalizedMonitorings.length === 0 && (
-                      <div className="profile-empty-card">У вас пока нет мониторингов. Нажмите «Купить подписку».</div>
-                    )}
+                    <span className="subscription-body">
+                      <strong>{monitoring.title || 'Мониторинг'}</strong>
+                      <span>
+                        {botShortName(monitoring.bot)} • {monitoring.is_active ? 'в работе' : 'остановлен'} •{' '}
+                        {monitoring.link_configured ? 'ссылка задана' : 'ссылка не задана'}
+                      </span>
+                    </span>
 
-                    {normalizedMonitorings.map((monitoring) => (
-                      <button
-                        key={monitoring.uid}
-                        type="button"
-                        className="subscription-card"
-                        onClick={() => openSubscriptionDetails(monitoring)}
-                      >
-                        <span className="subscription-avatar">◉</span>
-
-                        <span className="subscription-body">
-                          <strong>{monitoring.title || 'Мониторинг'}</strong>
-                          <span>
-                            {botShortName(monitoring.bot)} • {monitoring.is_active ? 'в работе' : 'остановлен'} •{' '}
-                            {monitoring.link_configured ? 'ссылка задана' : 'ссылка не задана'}
-                          </span>
-                        </span>
-
-                        <span className="subscription-chevron">
-                          <IconChevron />
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                    <span className="subscription-chevron">
+                      <IconChevron />
+                    </span>
+                  </button>
+                ))}
               </div>
 
               <button

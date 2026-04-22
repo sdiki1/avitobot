@@ -408,6 +408,8 @@ def _finalize_subscription_payment(
         int(current_total_slots),
         _safe_int(payload.get("target_total_slots"), int(current_total_slots)),
     )
+    if bool(payload.get("create_new_monitoring")):
+        target_total_slots = max(target_total_slots, int(current_total_slots) + 1)
 
     subscription = activate_user_subscription(
         db,
@@ -921,6 +923,7 @@ def purchase_subscription(
         "subscription_type": plan_subscription_type,
         "duration_days": int(plan.duration_days),
         "monitoring_id": target_monitoring.id if target_monitoring else None,
+        "create_new_monitoring": target_monitoring is None,
         "base_price_rub": base_price,
         "speed_surcharge_rub": 0,
         "total_price_rub": total_price,
