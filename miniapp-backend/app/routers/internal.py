@@ -219,7 +219,6 @@ def active_monitorings(db: Session = Depends(get_db)) -> list[dict]:
             select(UserSubscription).where(
                 and_(
                     UserSubscription.user_id == user.id,
-                    UserSubscription.status == "active",
                     UserSubscription.ends_at > now,
                 )
             )
@@ -432,7 +431,6 @@ def monitoring_state(monitoring_id: int, db: Session = Depends(get_db)) -> dict:
             select(UserSubscription).where(
                 and_(
                     UserSubscription.user_id == user.id,
-                    UserSubscription.status == "active",
                     UserSubscription.ends_at > now,
                 )
             )

@@ -208,10 +208,24 @@ def get_active_subscription_query(user_id: int) -> Select[tuple[UserSubscription
     return select(UserSubscription).where(
         and_(
             UserSubscription.user_id == user_id,
-            UserSubscription.status == "active",
             UserSubscription.ends_at > now_utc(),
         )
     ).order_by(UserSubscription.ends_at.desc())
+
+
+def get_active_links_limit(db: Session, user_id: int) -> int:
+    total = db.scalar(
+        select(func.coalesce(func.sum(TariffPlan.links_limit), 0))
+        .select_from(UserSubscription)
+        .join(TariffPlan, UserSubscription.plan_id == TariffPlan.id, isouter=True)
+        .where(
+            and_(
+                UserSubscription.user_id == user_id,
+                UserSubscription.ends_at > now_utc(),
+            )
+        )
+    )
+    return max(0, int(total or 0))
 
 
 def activate_user_subscription(
@@ -223,10 +237,6 @@ def activate_user_subscription(
     amount_paid_override: int | None = None,
     is_trial: bool = False,
 ) -> UserSubscription:
-    active_sub = db.scalar(get_active_subscription_query(user_id))
-    if active_sub:
-        active_sub.status = "expired"
-
     started = now_utc()
     duration_days = duration_days_override if duration_days_override is not None else plan.duration_days
     amount_paid = amount_paid_override if amount_paid_override is not None else plan.price_rub

@@ -32,6 +32,7 @@ from app.services.helpers import (
     apply_referral_code,
     ensure_subscription_monitoring_slots,
     ensure_user_referral_code,
+    get_active_links_limit,
     get_miniapp_content_settings,
     get_active_subscription_query,
     get_available_bot_for_user,
@@ -576,14 +577,15 @@ def profile(
     active_monitorings = db.scalar(
         select(func.count(Monitoring.id)).where(and_(Monitoring.user_id == user.id, Monitoring.is_active.is_(True)))
     )
-    allowed_slots = subscription.plan.links_limit if subscription and subscription.plan else 0
+    now = now_utc()
+    allowed_slots = get_active_links_limit(db, user.id)
     _release_stale_monitoring_slots(db, user.id, allowed_slots)
     user_monitorings = db.scalars(
         select(Monitoring)
         .where(
             and_(
                 Monitoring.user_id == user.id,
-                Monitoring.is_active.is_(True),
+                Monitoring.bot_id.is_not(None),
             )
         )
         .order_by(Monitoring.id.asc())
@@ -626,7 +628,7 @@ def profile(
             "id": subscription.id,
             "plan_id": subscription.plan_id,
             "ends_at": subscription.ends_at,
-            "status": subscription.status,
+            "status": "active" if subscription.ends_at and subscription.ends_at > now else "expired",
             "is_trial": subscription.is_trial,
             "links_limit": subscription.plan.links_limit if subscription.plan else 0,
             "plan_name": subscription.plan.name if subscription.plan else "Без тарифа",
@@ -637,7 +639,7 @@ def profile(
             "id": sub.id,
             "plan_id": sub.plan_id,
             "plan_name": sub.plan.name if sub.plan else "Без тарифа",
-            "status": sub.status,
+            "status": "active" if sub.ends_at and sub.ends_at > now else "expired",
             "is_trial": sub.is_trial,
             "amount_paid": sub.amount_paid,
             "links_limit": sub.plan.links_limit if sub.plan else 0,
@@ -672,10 +674,9 @@ def list_monitorings(
 ) -> list[MonitoringResponse]:
     assert_telegram_id_match(auth_user, telegram_id)
     user = auth_user
-    active_sub = db.scalar(get_active_subscription_query(user.id))
-    allowed_slots = active_sub.plan.links_limit if active_sub and active_sub.plan else 0
+    allowed_slots = get_active_links_limit(db, user.id)
     _release_stale_monitoring_slots(db, user.id, allowed_slots)
-    if not active_sub:
+    if allowed_slots <= 0:
         return []
 
     monitorings = db.scalars(
@@ -683,7 +684,7 @@ def list_monitorings(
         .where(
             and_(
                 Monitoring.user_id == user.id,
-                Monitoring.is_active.is_(True),
+                Monitoring.bot_id.is_not(None),
             )
         )
         .order_by(Monitoring.id.desc())
@@ -699,8 +700,8 @@ def create_monitoring(
 ) -> MonitoringResponse:
     assert_telegram_id_match(auth_user, payload.telegram_id)
     user = auth_user
-    active_sub = _require_active_subscription(db, user.id)
-    links_limit = active_sub.plan.links_limit if active_sub.plan else 0
+    _require_active_subscription(db, user.id)
+    links_limit = get_active_links_limit(db, user.id)
     _release_stale_monitoring_slots(db, user.id, links_limit)
     _require_slot_available(db, user.id, links_limit)
     bot = get_available_bot_for_user(db, user.id)
@@ -832,8 +833,8 @@ def purchase_monitoring(
 ) -> MonitoringResponse:
     assert_telegram_id_match(auth_user, payload.telegram_id)
     user = auth_user
-    active_sub = _require_active_subscription(db, user.id)
-    links_limit = active_sub.plan.links_limit if active_sub.plan else 0
+    _require_active_subscription(db, user.id)
+    links_limit = get_active_links_limit(db, user.id)
     _release_stale_monitoring_slots(db, user.id, links_limit)
     total_before = _require_slot_available(db, user.id, links_limit)
 
@@ -885,8 +886,7 @@ def purchase_subscription(
         if not target_monitoring:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Monitoring not found")
 
-    current_active_sub = db.scalar(get_active_subscription_query(user.id))
-    current_allowed_slots = current_active_sub.plan.links_limit if current_active_sub and current_active_sub.plan else 0
+    current_allowed_slots = get_active_links_limit(db, user.id)
     _release_stale_monitoring_slots(db, user.id, current_allowed_slots)
 
     slots_to_add = 0 if target_monitoring else 1

@@ -123,7 +123,7 @@ def stats(db: Session = Depends(get_db)) -> dict:
     ) or 0
     active_subscriptions = db.scalar(
         select(func.count(UserSubscription.id)).where(
-            and_(UserSubscription.status == "active", UserSubscription.ends_at > now_utc())
+            UserSubscription.ends_at > now_utc()
         )
     ) or 0
     payments_total = db.scalar(select(func.coalesce(func.sum(Payment.amount_rub), 0)).where(Payment.status == "completed")) or 0
