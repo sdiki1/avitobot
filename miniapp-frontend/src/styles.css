@@ -105,6 +105,27 @@ a {
   gap: 12px;
 }
 
+.subscription-home-sections {
+  display: grid;
+  gap: 12px;
+}
+
+.subscription-overview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.subscription-overview-pill {
+  border: 1px solid rgba(196, 173, 255, 0.35);
+  background: rgba(196, 173, 255, 0.1);
+  border-radius: 999px;
+  padding: 6px 10px;
+  color: #d8c8ff;
+  font-size: clamp(12px, 2.4vw, 15px);
+  line-height: 1.2;
+}
+
 .empty-card {
   border: 1px dashed var(--line);
   border-radius: 18px;
