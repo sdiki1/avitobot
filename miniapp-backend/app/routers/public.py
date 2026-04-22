@@ -134,13 +134,51 @@ def _require_active_subscription(db: Session, user_id: int) -> UserSubscription:
 
 
 def _require_slot_available(db: Session, user_id: int, links_limit: int) -> int:
-    total_links = db.scalar(select(func.count(Monitoring.id)).where(Monitoring.user_id == user_id)) or 0
+    total_links = db.scalar(
+        select(func.count(Monitoring.id)).where(
+            and_(
+                Monitoring.user_id == user_id,
+                Monitoring.bot_id.is_not(None),
+            )
+        )
+    ) or 0
     if total_links >= links_limit:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Лимит мониторингов по тарифу исчерпан ({links_limit})",
         )
     return total_links
+
+
+def _release_stale_monitoring_slots(db: Session, user_id: int, allowed_slots: int) -> int:
+    allowed = max(0, int(allowed_slots))
+    assigned = db.scalars(
+        select(Monitoring)
+        .where(
+            and_(
+                Monitoring.user_id == user_id,
+                Monitoring.bot_id.is_not(None),
+            )
+        )
+        .order_by(Monitoring.is_active.desc(), Monitoring.id.desc())
+    ).all()
+
+    if len(assigned) <= allowed:
+        return 0
+
+    keep_ids = {mon.id for mon in assigned[:allowed]}
+    released = 0
+    for mon in assigned:
+        if mon.id in keep_ids:
+            continue
+        mon.is_active = False
+        mon.bot_id = None
+        mon.notify_since_at = None
+        released += 1
+
+    if released:
+        db.commit()
+    return released
 
 
 def _require_free_bots_for_new_slots(db: Session, user_id: int, slots_to_add: int) -> None:
@@ -531,6 +569,8 @@ def profile(
     active_monitorings = db.scalar(
         select(func.count(Monitoring.id)).where(and_(Monitoring.user_id == user.id, Monitoring.is_active.is_(True)))
     )
+    allowed_slots = subscription.plan.links_limit if subscription and subscription.plan else 0
+    _release_stale_monitoring_slots(db, user.id, allowed_slots)
     user_monitorings = db.scalars(
         select(Monitoring)
         .where(
@@ -626,6 +666,8 @@ def list_monitorings(
     assert_telegram_id_match(auth_user, telegram_id)
     user = auth_user
     active_sub = db.scalar(get_active_subscription_query(user.id))
+    allowed_slots = active_sub.plan.links_limit if active_sub and active_sub.plan else 0
+    _release_stale_monitoring_slots(db, user.id, allowed_slots)
     if not active_sub:
         return []
 
@@ -652,6 +694,7 @@ def create_monitoring(
     user = auth_user
     active_sub = _require_active_subscription(db, user.id)
     links_limit = active_sub.plan.links_limit if active_sub.plan else 0
+    _release_stale_monitoring_slots(db, user.id, links_limit)
     _require_slot_available(db, user.id, links_limit)
     bot = get_available_bot_for_user(db, user.id)
     if not bot:
@@ -784,6 +827,7 @@ def purchase_monitoring(
     user = auth_user
     active_sub = _require_active_subscription(db, user.id)
     links_limit = active_sub.plan.links_limit if active_sub.plan else 0
+    _release_stale_monitoring_slots(db, user.id, links_limit)
     total_before = _require_slot_available(db, user.id, links_limit)
 
     bot = get_available_bot_for_user(db, user.id)
@@ -834,10 +878,21 @@ def purchase_subscription(
         if not target_monitoring:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Monitoring not found")
 
+    current_active_sub = db.scalar(get_active_subscription_query(user.id))
+    current_allowed_slots = current_active_sub.plan.links_limit if current_active_sub and current_active_sub.plan else 0
+    _release_stale_monitoring_slots(db, user.id, current_allowed_slots)
+
     slots_to_add = 0 if target_monitoring else 1
     _require_free_bots_for_new_slots(db, user.id, slots_to_add)
 
-    current_total_slots = db.scalar(select(func.count(Monitoring.id)).where(Monitoring.user_id == user.id)) or 0
+    current_total_slots = db.scalar(
+        select(func.count(Monitoring.id)).where(
+            and_(
+                Monitoring.user_id == user.id,
+                Monitoring.bot_id.is_not(None),
+            )
+        )
+    ) or 0
     target_total_slots = current_total_slots + slots_to_add
 
     base_price = max(0, int(plan.price_rub))

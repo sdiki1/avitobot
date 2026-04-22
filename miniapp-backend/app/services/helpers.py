@@ -277,7 +277,14 @@ def ensure_subscription_monitoring_slots(db: Session, user_id: int, links_limit:
     if target_slots == 0:
         return 0
 
-    existing_total = db.scalar(select(func.count(Monitoring.id)).where(Monitoring.user_id == user_id)) or 0
+    existing_total = db.scalar(
+        select(func.count(Monitoring.id)).where(
+            and_(
+                Monitoring.user_id == user_id,
+                Monitoring.bot_id.is_not(None),
+            )
+        )
+    ) or 0
     if existing_total >= target_slots:
         return 0
 
