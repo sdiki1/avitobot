@@ -816,9 +816,19 @@ def build_router(bot_id: int, backend: BackendAPI, *, is_primary: bool = False) 
                 reply_markup=buy_subscription_keyboard(message.from_user.id),
             )
             return
+        error_text = _extract_error(payload)
+        if status_code == 404 and "нет назначенной подписки" in error_text.lower():
+            await _answer_with_static_photo(
+                message,
+                "Не удалось запустить: Для этого бота нет назначенной подписки.\n\n"
+                "Вы можете приобрести подписку в приложении",
+                photo_key="error",
+                reply_markup=buy_subscription_keyboard(message.from_user.id),
+            )
+            return
         await _answer_with_static_photo(
             message,
-            f"Не удалось запустить: {_extract_error(payload)}",
+            f"Не удалось запустить: {error_text}",
             photo_key="error",
             reply_markup=monitoring_actions_keyboard(message.from_user.id),
         )
@@ -1033,13 +1043,9 @@ def build_router(bot_id: int, backend: BackendAPI, *, is_primary: bool = False) 
     async def btn_change_link(message: Message, state: FSMContext) -> None:
         await _prompt_change_link(message, state)
 
-    @router.message(Command("miniapp"))
-    async def cmd_miniapp(message: Message) -> None:
-        await message.answer("Откройте miniapp", reply_markup=miniapp_keyboard(message.from_user.id))
-
     @router.message(F.text == BTN_OPEN_MINIAPP)
     async def btn_miniapp(message: Message) -> None:
-        await cmd_miniapp(message)
+        await message.answer("Откройте приложение", reply_markup=miniapp_keyboard(message.from_user.id))
 
     return router
 
@@ -1384,7 +1390,6 @@ class MultiBotManager:
                         BotCommand(command="stop_monitoring", description="Остановить мониторинг"),
                         BotCommand(command="change_link", description="Поменять ссылку"),
                         BotCommand(command="status", description="Статус мониторинга"),
-                        BotCommand(command="miniapp", description="Открыть miniapp"),
                     ]
                 )
         except Exception as exc:

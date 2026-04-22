@@ -83,6 +83,11 @@ services:
       REDIS_NOTIFY_QUEUE_PREFIX: ${REDIS_NOTIFY_QUEUE_PREFIX:-notify:bot:}
       BOTS_REFRESH_SEC: ${BOTS_REFRESH_SEC:-15}
       NOTIFY_POLL_SEC: ${NOTIFY_POLL_SEC:-4}
+    volumes:
+      - ./msg_error.jpeg:/app/msg_error.jpeg:ro
+      - ./msg_link_change.jpeg:/app/msg_link_change.jpeg:ro
+      - ./msg_monitoring_start.jpeg:/app/msg_monitoring_start.jpeg:ro
+      - ./msg_monitoring_stop.png:/app/msg_monitoring_stop.png:ro
     depends_on:
       miniapp-backend:
         condition: service_started
