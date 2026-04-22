@@ -754,16 +754,20 @@ def update_monitoring(
     if not monitoring:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Monitoring not found")
     was_active = bool(monitoring.is_active)
+    prev_url = normalize_monitoring_url(monitoring.url)
     prev_include_photo = bool(monitoring.include_photo)
     prev_include_description = bool(monitoring.include_description)
     prev_include_seller_info = bool(monitoring.include_seller_info)
     prev_notify_price_drop = bool(monitoring.notify_price_drop)
+    link_changed = False
+    started_from_miniapp = False
 
     if payload.title is not None:
         monitoring.title = payload.title.strip() or monitoring.title
 
     if payload.url is not None:
         cleaned_url = normalize_monitoring_url(payload.url)
+        link_changed = cleaned_url != prev_url
         monitoring.url = cleaned_url
         monitoring.link_configured = bool(cleaned_url)
 
@@ -775,6 +779,9 @@ def update_monitoring(
             )
         if payload.is_active:
             _require_active_subscription(db, auth_user.id)
+            if not was_active:
+                monitoring.notify_since_at = now_utc()
+                started_from_miniapp = True
         monitoring.is_active = payload.is_active
 
     if payload.include_photo is not None:
@@ -797,8 +804,9 @@ def update_monitoring(
             payload.notify_price_drop is not None and bool(payload.notify_price_drop) != prev_notify_price_drop,
         ]
     )
+    clear_pending_notifications = settings_changed or started_from_miniapp
 
-    if settings_changed:
+    if clear_pending_notifications:
         db.execute(
             update(Notification)
             .where(
@@ -815,6 +823,15 @@ def update_monitoring(
         db.commit()
         if monitoring.bot_id:
             purge_monitoring_notifications(int(monitoring.bot_id), int(monitoring.id))
+
+    if link_changed and monitoring.link_configured:
+        title = (monitoring.title or f"Мониторинг #{monitoring.id}").strip()
+        message = (
+            "🔗 Ссылка изменена.\n"
+            f"Мониторинг: «{title}»\n"
+            f"Новая ссылка:\n{monitoring.url}"
+        )
+        send_monitoring_bot_message(db, monitoring, auth_user.telegram_id, message)
 
     if was_active and not monitoring.is_active and payload.is_active is False:
         title = (monitoring.title or f"Мониторинг #{monitoring.id}").strip()

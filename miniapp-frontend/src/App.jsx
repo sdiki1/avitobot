@@ -100,6 +100,15 @@ function buildSubscriptionBotLink(bot) {
 
 function openExternal(url) {
   if (!url) return
+  const tg = window.Telegram?.WebApp
+  if (tg?.openTelegramLink && /^https:\/\/t\.me\//i.test(url)) {
+    tg.openTelegramLink(url)
+    return
+  }
+  if (tg?.openLink) {
+    tg.openLink(url)
+    return
+  }
   window.open(url, '_blank', 'noopener,noreferrer')
 }
 
@@ -209,6 +218,31 @@ function normalizeParamFlags(monitoring) {
   }
 }
 
+function normalizeDraftTitle(value) {
+  return String(value || '').trim()
+}
+
+function normalizeDraftUrl(value) {
+  return String(value || '').trim()
+}
+
+function hasMonitoringSettingsChanges(monitoring, draft, flags) {
+  if (!monitoring) return false
+
+  const currentTitle = normalizeDraftTitle(draft?.title)
+  const currentUrl = normalizeDraftUrl(draft?.url)
+  const sourceTitle = normalizeDraftTitle(monitoring.title)
+  const sourceUrl = normalizeDraftUrl(monitoring.url)
+
+  if (currentTitle !== sourceTitle) return true
+  if (currentUrl !== sourceUrl) return true
+  if (Boolean(flags?.photo) !== Boolean(monitoring.include_photo)) return true
+  if (Boolean(flags?.description) !== Boolean(monitoring.include_description)) return true
+  if (Boolean(flags?.seller) !== Boolean(monitoring.include_seller_info)) return true
+  if (Boolean(flags?.price_drop) !== Boolean(monitoring.notify_price_drop)) return true
+  return false
+}
+
 export default function App() {
   const [tab, setTab] = useState(TABS.subscriptions)
   const [subscriptionView, setSubscriptionView] = useState(SUBSCRIPTION_VIEW.home)
@@ -229,7 +263,9 @@ export default function App() {
   const [purchaseStatusBusy, setPurchaseStatusBusy] = useState(false)
   const [trialBusy, setTrialBusy] = useState(false)
   const [saveMonitoringBusy, setSaveMonitoringBusy] = useState(false)
+  const [startMonitoringBusy, setStartMonitoringBusy] = useState(false)
   const [stopMonitoringBusy, setStopMonitoringBusy] = useState(false)
+  const [autoSaveStatus, setAutoSaveStatus] = useState('idle')
   const [pendingPaymentId, setPendingPaymentId] = useState(null)
   const [pendingPaymentUrl, setPendingPaymentUrl] = useState('')
   const [selectedType, setSelectedType] = useState(TYPE_OPTIONS[0].id)
@@ -586,30 +622,51 @@ export default function App() {
     }
   }
 
-  const saveMonitoringSettings = async () => {
-    if (!telegramId || !selectedMonitoring || selectedMonitoring.virtual || saveMonitoringBusy) return
-    const draft = drafts[selectedMonitoring.uid] || { title: selectedMonitoring.title || '', url: selectedMonitoring.url || '' }
-    const flags = paramFlags[selectedMonitoring.uid] || DEFAULT_PARAM_FLAGS
-    try {
-      setSaveMonitoringBusy(true)
-      await updateMonitoring(selectedMonitoring.id, {
+  const applyMonitoringUpdateToState = useCallback((updatedMonitoring) => {
+    if (!updatedMonitoring?.id) return
+    const uid = String(updatedMonitoring.id)
+
+    setMonitorings((prev) =>
+      prev.map((item) => (Number(item.id) === Number(updatedMonitoring.id) ? updatedMonitoring : item)),
+    )
+    setDrafts((prev) => ({
+      ...prev,
+      [uid]: {
+        title: updatedMonitoring.title || '',
+        url: updatedMonitoring.url || '',
+      },
+    }))
+    setParamFlags((prev) => ({
+      ...prev,
+      [uid]: normalizeParamFlags(updatedMonitoring),
+    }))
+  }, [])
+
+  const persistMonitoringSettings = useCallback(
+    async ({ monitoring, draft, flags, extraPatch = {}, force = false }) => {
+      if (!telegramId || !monitoring || monitoring.virtual) return monitoring
+
+      const hasSettingsChanges = hasMonitoringSettingsChanges(monitoring, draft, flags)
+      const hasExtraPatch = Object.keys(extraPatch).length > 0
+      if (!force && !hasSettingsChanges && !hasExtraPatch) {
+        return monitoring
+      }
+
+      const updated = await updateMonitoring(monitoring.id, {
         telegram_id: Number(telegramId),
-        title: draft.title || null,
-        url: draft.url || '',
-        include_photo: !!flags.photo,
-        include_description: !!flags.description,
-        include_seller_info: !!flags.seller,
-        notify_price_drop: !!flags.price_drop,
+        title: draft?.title || null,
+        url: draft?.url || '',
+        include_photo: Boolean(flags?.photo),
+        include_description: Boolean(flags?.description),
+        include_seller_info: Boolean(flags?.seller),
+        notify_price_drop: Boolean(flags?.price_drop),
+        ...extraPatch,
       })
-      await loadData(telegramId)
-      setStatusMessage('Настройки мониторинга сохранены')
-    } catch (error) {
-      const detail = error?.response?.data?.detail || error?.message || 'Ошибка сохранения настроек'
-      setStatusMessage(`Ошибка: ${detail}`)
-    } finally {
-      setSaveMonitoringBusy(false)
-    }
-  }
+      applyMonitoringUpdateToState(updated)
+      return updated
+    },
+    [applyMonitoringUpdateToState, telegramId],
+  )
 
   const stopSelectedMonitoring = async () => {
     if (!telegramId || !selectedMonitoring || selectedMonitoring.virtual || stopMonitoringBusy) return
@@ -617,19 +674,74 @@ export default function App() {
       setStatusMessage('Мониторинг уже остановлен')
       return
     }
+    const draft = drafts[selectedMonitoring.uid] || { title: selectedMonitoring.title || '', url: selectedMonitoring.url || '' }
+    const flags = paramFlags[selectedMonitoring.uid] || normalizeParamFlags(selectedMonitoring)
     try {
       setStopMonitoringBusy(true)
-      await updateMonitoring(selectedMonitoring.id, {
-        telegram_id: Number(telegramId),
-        is_active: false,
+      await persistMonitoringSettings({
+        monitoring: selectedMonitoring,
+        draft,
+        flags,
+        extraPatch: { is_active: false },
+        force: true,
       })
-      await loadData(telegramId)
       setStatusMessage('Мониторинг остановлен')
     } catch (error) {
       const detail = error?.response?.data?.detail || error?.message || 'Ошибка остановки мониторинга'
       setStatusMessage(`Ошибка: ${detail}`)
     } finally {
       setStopMonitoringBusy(false)
+    }
+  }
+
+  const startSelectedMonitoringAndOpenBot = async () => {
+    if (!telegramId || !selectedMonitoring || selectedMonitoring.virtual || startMonitoringBusy || stopMonitoringBusy || saveMonitoringBusy) return
+    if (!detailBotLink) {
+      setStatusMessage('Для этой подписки бот пока не назначен')
+      return
+    }
+    const draft = drafts[selectedMonitoring.uid] || { title: selectedMonitoring.title || '', url: selectedMonitoring.url || '' }
+    const flags = paramFlags[selectedMonitoring.uid] || normalizeParamFlags(selectedMonitoring)
+    const shouldStart = !selectedMonitoring.is_active
+    try {
+      setStartMonitoringBusy(true)
+      await persistMonitoringSettings({
+        monitoring: selectedMonitoring,
+        draft,
+        flags,
+        extraPatch: shouldStart ? { is_active: true } : {},
+      })
+      setStatusMessage(shouldStart ? 'Мониторинг запущен. Переходим в бота…' : 'Переходим в бота…')
+      openExternal(detailBotLink)
+    } catch (error) {
+      const detail = error?.response?.data?.detail || error?.message || 'Ошибка запуска мониторинга'
+      setStatusMessage(`Ошибка: ${detail}`)
+    } finally {
+      setStartMonitoringBusy(false)
+    }
+  }
+
+  const openBotWithAutoSave = async () => {
+    if (!telegramId || !selectedMonitoring || selectedMonitoring.virtual || startMonitoringBusy || stopMonitoringBusy || saveMonitoringBusy) return
+    if (!detailBotLink) {
+      setStatusMessage('Для этой подписки бот пока не назначен')
+      return
+    }
+    const draft = drafts[selectedMonitoring.uid] || { title: selectedMonitoring.title || '', url: selectedMonitoring.url || '' }
+    const flags = paramFlags[selectedMonitoring.uid] || normalizeParamFlags(selectedMonitoring)
+    try {
+      setStartMonitoringBusy(true)
+      await persistMonitoringSettings({
+        monitoring: selectedMonitoring,
+        draft,
+        flags,
+      })
+      openExternal(detailBotLink)
+    } catch (error) {
+      const detail = error?.response?.data?.detail || error?.message || 'Ошибка сохранения настроек'
+      setStatusMessage(`Ошибка: ${detail}`)
+    } finally {
+      setStartMonitoringBusy(false)
     }
   }
 
@@ -684,6 +796,54 @@ export default function App() {
         ? [profile.subscription]
         : []
   const assignedBots = Array.isArray(profile?.assigned_bots) ? profile.assigned_bots : []
+
+  useEffect(() => {
+    if (!telegramId || !selectedMonitoring || selectedMonitoring.virtual) {
+      setAutoSaveStatus('idle')
+      return
+    }
+    if (startMonitoringBusy || stopMonitoringBusy) {
+      return
+    }
+
+    const draft = drafts[selectedMonitoring.uid] || { title: selectedMonitoring.title || '', url: selectedMonitoring.url || '' }
+    const flags = paramFlags[selectedMonitoring.uid] || normalizeParamFlags(selectedMonitoring)
+    if (!hasMonitoringSettingsChanges(selectedMonitoring, draft, flags)) {
+      setAutoSaveStatus('idle')
+      return
+    }
+
+    const timerId = setTimeout(async () => {
+      if (saveMonitoringBusy || startMonitoringBusy || stopMonitoringBusy) return
+      try {
+        setSaveMonitoringBusy(true)
+        setAutoSaveStatus('saving')
+        await persistMonitoringSettings({
+          monitoring: selectedMonitoring,
+          draft,
+          flags,
+        })
+        setAutoSaveStatus('saved')
+      } catch (error) {
+        const detail = error?.response?.data?.detail || error?.message || 'Ошибка автосохранения'
+        setAutoSaveStatus('error')
+        setStatusMessage(`Ошибка: ${detail}`)
+      } finally {
+        setSaveMonitoringBusy(false)
+      }
+    }, 700)
+
+    return () => clearTimeout(timerId)
+  }, [
+    drafts,
+    paramFlags,
+    persistMonitoringSettings,
+    saveMonitoringBusy,
+    selectedMonitoring,
+    startMonitoringBusy,
+    stopMonitoringBusy,
+    telegramId,
+  ])
 
   return (
     <div className="app-root">
@@ -812,14 +972,16 @@ export default function App() {
                     ))}
                   </div>
 
-                  <button
-                    type="button"
-                    className="secondary-btn"
-                    onClick={saveMonitoringSettings}
-                    disabled={selectedMonitoring.virtual || saveMonitoringBusy || stopMonitoringBusy}
+                  <p
+                    className={`hint-text ${
+                      autoSaveStatus === 'error' ? 'hint-error' : autoSaveStatus === 'saved' ? 'hint-success' : ''
+                    }`}
                   >
-                    {saveMonitoringBusy ? 'Сохранение...' : 'Сохранить настройки'}
-                  </button>
+                    {autoSaveStatus === 'saving' && 'Сохраняем изменения...'}
+                    {autoSaveStatus === 'saved' && 'Изменения сохранены автоматически'}
+                    {autoSaveStatus === 'error' && 'Ошибка автосохранения. Попробуйте еще раз'}
+                    {autoSaveStatus === 'idle' && 'Все изменения сохраняются автоматически'}
+                  </p>
 
                   {!selectedMonitoring.virtual && (
                     <button
@@ -846,27 +1008,17 @@ export default function App() {
                   <button
                     type="button"
                     className="primary-btn"
-                    onClick={() => {
-                      if (!detailBotLink) {
-                        setStatusMessage('Для этой подписки бот пока не назначен')
-                        return
-                      }
-                      openExternal(detailBotLink)
-                    }}
+                    onClick={startSelectedMonitoringAndOpenBot}
+                    disabled={startMonitoringBusy || stopMonitoringBusy || saveMonitoringBusy}
                   >
-                    Запустить поиск
+                    {startMonitoringBusy ? 'Запускаем...' : 'Запустить мониторинг и перейти в бота'}
                   </button>
 
                   <button
                     type="button"
                     className="secondary-btn"
-                    onClick={() => {
-                      if (!detailBotLink) {
-                        setStatusMessage('Для этой подписки бот пока не назначен')
-                        return
-                      }
-                      openExternal(detailBotLink)
-                    }}
+                    onClick={openBotWithAutoSave}
+                    disabled={startMonitoringBusy || stopMonitoringBusy || saveMonitoringBusy}
                   >
                     Перейти в бота отправителя
                   </button>
