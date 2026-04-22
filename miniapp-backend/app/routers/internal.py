@@ -154,6 +154,27 @@ def sync_bot(bot_id: int, payload: InternalBotSyncRequest, db: Session = Depends
     return {"ok": True}
 
 
+@router.get("/users/{telegram_id}/active-subscription")
+def active_subscription_info(telegram_id: int, db: Session = Depends(get_db)) -> dict:
+    user = db.scalar(select(User).where(User.telegram_id == telegram_id))
+    if not user:
+        return {"active": False}
+
+    subscription = db.scalar(get_active_subscription_query(user.id))
+    if not subscription:
+        return {"active": False}
+
+    return {
+        "active": True,
+        "id": subscription.id,
+        "plan_id": subscription.plan_id,
+        "plan_name": subscription.plan.name if subscription.plan else "Без тарифа",
+        "links_limit": subscription.plan.links_limit if subscription.plan else 0,
+        "is_trial": bool(subscription.is_trial),
+        "ends_at": subscription.ends_at,
+    }
+
+
 @router.post("/proxies/blocked")
 def mark_proxy_blocked(payload: InternalProxyBlockedRequest, db: Session = Depends(get_db)) -> dict:
     raw_proxy = (payload.proxy_url or "").strip()

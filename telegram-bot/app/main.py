@@ -77,18 +77,24 @@ START_COMMAND_TEXT = (
     "«Открыть приложение»."
 )
 
+APP_ROOT = Path(__file__).resolve().parents[1]
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 STATIC_MESSAGE_PHOTOS = {
     "error": [
+        APP_ROOT / "msg_error.jpeg",
         PROJECT_ROOT / "msg_error.jpeg",
     ],
     "link_change": [
+        APP_ROOT / "msg_link_change.jpeg",
         PROJECT_ROOT / "msg_link_change.jpeg",
     ],
     "monitoring_start": [
+        APP_ROOT / "msg_monitoring_start.jpeg",
         PROJECT_ROOT / "msg_monitoring_start.jpeg",
     ],
     "monitoring_stop": [
+        APP_ROOT / "msg_monitoring_stop.jpeg",
+        APP_ROOT / "msg_monitoring_stop.png",
         PROJECT_ROOT / "msg_monitoring_stop.jpeg",
         PROJECT_ROOT / "msg_monitoring_stop.png",
     ],
@@ -639,6 +645,15 @@ class BackendAPI:
         payload = response.json()
         return payload if isinstance(payload, dict) else {}
 
+    async def get_active_subscription_info(self, telegram_id: int) -> dict[str, Any]:
+        response = await self.client.get(
+            f"{BACKEND_URL}/api/v1/internal/users/{telegram_id}/active-subscription",
+            headers={"X-Internal-Token": INTERNAL_API_TOKEN},
+        )
+        response.raise_for_status()
+        payload = response.json()
+        return payload if isinstance(payload, dict) else {}
+
     async def onboarding_trial(self, telegram_id: int) -> dict[str, Any]:
         response = await self.client.post(
             f"{BACKEND_URL}/api/v1/public/onboarding-trial",
@@ -900,26 +915,25 @@ def build_router(bot_id: int, backend: BackendAPI, *, is_primary: bool = False) 
 
         if start_arg == "subscription":
             try:
-                profile = await backend.get_profile(tg_user.id)
+                subscription_info = await backend.get_active_subscription_info(tg_user.id)
             except Exception as exc:
-                logger.warning(f"Failed to load profile for subscription deep-link: {exc}")
-                profile = {}
+                logger.warning(f"Failed to load active subscription for subscription deep-link: {exc}")
+                subscription_info = {}
 
-            subscription = profile.get("subscription") if isinstance(profile, dict) else None
-            if subscription:
-                trial_suffix = " (пробный период)" if subscription.get("is_trial") else ""
+            if subscription_info.get("active"):
+                trial_suffix = " (пробный период)" if subscription_info.get("is_trial") else ""
                 subscription_line = (
                     f"Подписка: активна{trial_suffix}\n"
-                    f"План: {subscription.get('plan_name') or '—'}\n"
-                    f"До: {_format_datetime_ru(subscription.get('ends_at'))}\n"
-                    f"Лимит: {subscription.get('links_limit', 0)} мониторингов"
+                    f"План: {subscription_info.get('plan_name') or '—'}\n"
+                    f"До: {_format_datetime_ru(subscription_info.get('ends_at'))}\n"
+                    f"Лимит: {subscription_info.get('links_limit', 0)} мониторингов"
                 )
             else:
                 subscription_line = "Подписка: неактивна"
 
             if status_code != 200:
                 if status_code == 404:
-                    if subscription:
+                    if subscription_info.get("active"):
                         await message.answer(
                             "Подписка активна, но этот бот не привязан к вашему мониторингу.\n"
                             "Откройте назначенного бота из раздела Подписки в miniapp.",
