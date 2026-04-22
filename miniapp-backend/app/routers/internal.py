@@ -175,6 +175,7 @@ def active_monitorings(db: Session = Depends(get_db)) -> list[dict]:
             and_(
                 ProxyConfig.is_active.is_(True),
                 or_(ProxyConfig.cooldown_until.is_(None), ProxyConfig.cooldown_until <= now),
+                ProxyConfig.name.notlike("env-proxy-%"),
             )
         )
         .order_by(ProxyConfig.id.asc())
@@ -201,12 +202,7 @@ def active_monitorings(db: Session = Depends(get_db)) -> list[dict]:
         proxy_url = None
         if active_proxy_urls:
             first_idx = mon.id % len(active_proxy_urls)
-            proxy_pool.append(active_proxy_urls[first_idx])
-            if len(active_proxy_urls) > 1:
-                second_idx = (first_idx + 1) % len(active_proxy_urls)
-                second_proxy = active_proxy_urls[second_idx]
-                if second_proxy not in proxy_pool:
-                    proxy_pool.append(second_proxy)
+            proxy_pool = active_proxy_urls[first_idx:] + active_proxy_urls[:first_idx]
             proxy_url = proxy_pool[0]
 
         payload.append(

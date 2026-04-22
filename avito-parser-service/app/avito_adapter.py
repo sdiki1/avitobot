@@ -161,25 +161,62 @@ class AvitoAdapter:
         except Exception as exc:
             logger.warning(f"Failed to report blocked proxy={proxy_url}: {exc}")
 
-    def _proxy_candidates(self) -> list[str]:
-        candidates: list[str] = []
+    def _proxy_candidates(self, monitoring: dict[str, Any]) -> tuple[list[str], list[str]]:
+        seen: set[str] = set()
+        db_candidates: list[str] = []
+        env_candidates: list[str] = []
+
+        raw_db_pool = monitoring.get("proxy_pool")
+        if isinstance(raw_db_pool, list):
+            for raw in raw_db_pool:
+                if not isinstance(raw, str):
+                    continue
+                normalized = self._normalize_proxy_url(raw)
+                if (
+                    normalized
+                    and normalized not in seen
+                    and not self._is_proxy_cooling_down(normalized)
+                ):
+                    db_candidates.append(normalized)
+                    seen.add(normalized)
+
+        raw_db_single = monitoring.get("proxy_url")
+        if isinstance(raw_db_single, str):
+            normalized = self._normalize_proxy_url(raw_db_single)
+            if (
+                normalized
+                and normalized not in seen
+                and not self._is_proxy_cooling_down(normalized)
+            ):
+                db_candidates.append(normalized)
+                seen.add(normalized)
 
         for raw in PARSER_PROXY_LIST:
             normalized = self._normalize_proxy_url(raw)
-            if normalized and normalized not in candidates and not self._is_proxy_cooling_down(normalized):
-                candidates.append(normalized)
+            if (
+                normalized
+                and normalized not in seen
+                and not self._is_proxy_cooling_down(normalized)
+            ):
+                env_candidates.append(normalized)
+                seen.add(normalized)
 
-        return candidates
+        return db_candidates, env_candidates
 
-    def _request_with_failover(self, url: str) -> requests.Response:
-        candidates = self._proxy_candidates()
+    def _request_with_failover(self, url: str, monitoring: dict[str, Any]) -> requests.Response:
+        db_candidates, env_candidates = self._proxy_candidates(monitoring)
+        candidates: list[tuple[str, str]] = [(proxy, "db") for proxy in db_candidates] + [
+            (proxy, "env") for proxy in env_candidates
+        ]
         last_exc: Exception | None = None
 
-        for idx, proxy in enumerate(candidates, start=1):
-            proxy_label = f"{idx}/{len(candidates)}"
+        for idx, (proxy, source) in enumerate(candidates, start=1):
+            proxy_label = f"{idx}/{len(candidates)} source={source}"
             proxies = {"http": proxy, "https": proxy}
+            if source == "env" and idx == len(db_candidates) + 1 and db_candidates:
+                logger.warning(f"All DB proxies failed for url={url}. Switching to .env fallback pool.")
             try:
-                response = requests.get(url, headers=HEADERS, timeout=25, proxies=proxies)
+                response = requests.get(url, headers=HEADERS, timeout=max(10, REQUEST_TIMEOUT_SEC), proxies=proxies)
                 response.raise_for_status()
                 if idx > 1:
                     logger.info(f"Recovered with fallback proxy {proxy_label} for url={url}")
@@ -187,9 +224,10 @@ class AvitoAdapter:
             except requests.exceptions.HTTPError as exc:
                 status_code = exc.response.status_code if exc.response is not None else None
                 last_exc = exc
-                if status_code in {403, 429}:
+                if status_code in {403, 407, 429} or (status_code is not None and status_code >= 500):
                     self._set_local_proxy_cooldown(proxy)
-                    self._report_blocked_proxy(proxy, status_code, url)
+                    if source == "db":
+                        self._report_blocked_proxy(proxy, int(status_code or 0), url)
                     logger.warning(
                         f"Proxy {proxy_label} blocked for url={url}: status={status_code}. Switching to next proxy."
                     )
@@ -197,17 +235,23 @@ class AvitoAdapter:
                 raise
             except (requests.exceptions.ProxyError, requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
                 last_exc = exc
+                self._set_local_proxy_cooldown(proxy)
+                if source == "db":
+                    self._report_blocked_proxy(proxy, 0, url)
                 logger.warning(f"Proxy {proxy_label} failed for url={url}: {exc}. Switching to next proxy.")
                 continue
             except requests.exceptions.InvalidSchema as exc:
                 last_exc = exc
                 if "SOCKS support" in str(exc):
+                    self._set_local_proxy_cooldown(proxy)
+                    if source == "db":
+                        self._report_blocked_proxy(proxy, 0, url)
                     logger.warning(f"Proxy {proxy_label} has unsupported SOCKS schema: {exc}. Switching to next proxy.")
                     continue
                 raise
 
         if not candidates:
-            raise RuntimeError("PARSER_PROXY_LIST is empty. Configure proxies in .env")
+            raise RuntimeError("No available proxies: DB pool is empty/unavailable and PARSER_PROXY_LIST fallback is empty")
 
         if last_exc is not None:
             raise last_exc
@@ -215,7 +259,7 @@ class AvitoAdapter:
 
     def parse_monitoring(self, monitoring: dict[str, Any]) -> list[dict[str, Any]]:
         url = self._normalize_avito_url(monitoring["url"])
-        response = self._request_with_failover(url)
+        response = self._request_with_failover(url, monitoring)
 
         data = self.find_json_on_page(response.text)
         catalog = data.get("catalog") or {}
