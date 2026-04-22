@@ -411,6 +411,28 @@ a {
   font-size: clamp(13px, 2.6vw, 18px);
 }
 
+.profile-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.profile-section-toggle {
+  border: 1px solid rgba(196, 173, 255, 0.35);
+  border-radius: 999px;
+  background: rgba(196, 173, 255, 0.1);
+  color: #d8c8ff;
+  padding: 4px 10px;
+  font-size: clamp(12px, 2.4vw, 14px);
+  line-height: 1.1;
+  cursor: pointer;
+}
+
+.profile-section-toggle:active {
+  transform: translateY(1px);
+}
+
 .profile-empty-card {
   border: 1px dashed var(--line);
   border-radius: 14px;

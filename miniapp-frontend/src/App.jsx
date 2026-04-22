@@ -236,6 +236,7 @@ export default function App() {
   const [selectedPlanId, setSelectedPlanId] = useState(null)
   const [useReferralBalance, setUseReferralBalance] = useState(false)
   const [buyDraft, setBuyDraft] = useState({ title: '', url: '' })
+  const [allSubscriptionsExpanded, setAllSubscriptionsExpanded] = useState(true)
 
   useEffect(() => {
     if (window.Telegram && window.Telegram.WebApp) {
@@ -1058,30 +1059,40 @@ export default function App() {
                 </div>
 
                 <div className="profile-section">
-                  <span className="profile-section-title">Все подписки</span>
-                  {profileSubscriptions.length > 0 ? (
-                    <div className="profile-subscriptions-grid">
-                      {profileSubscriptions.map((sub, index) => {
-                        const state = getSubscriptionState(sub)
-                        return (
-                          <article className="profile-subscription-card" key={sub?.id || `all-${index}`}>
-                            <div className="profile-subscription-head">
-                              <strong>{subscriptionTitle(sub)}</strong>
-                              <span className={`profile-subscription-badge ${state.tone}`}>{state.label}</span>
-                            </div>
-                            <div className="profile-subscription-meta">
-                              <span>Начало: {formatDateTime(sub?.started_at)}</span>
-                              <span>До: {formatDateTime(sub?.ends_at)}</span>
-                              <span>Лимит: {sub?.links_limit ?? 0}</span>
-                              <span>Оплата: {sub?.amount_paid ?? 0} ₽</span>
-                            </div>
-                          </article>
-                        )
-                      })}
-                    </div>
-                  ) : (
-                    <div className="profile-empty-card">Нет подписок</div>
-                  )}
+                  <div className="profile-section-header">
+                    <span className="profile-section-title">Все подписки</span>
+                    <button
+                      type="button"
+                      className="profile-section-toggle"
+                      onClick={() => setAllSubscriptionsExpanded((prev) => !prev)}
+                    >
+                      {allSubscriptionsExpanded ? 'Свернуть' : 'Развернуть'}
+                    </button>
+                  </div>
+                  {allSubscriptionsExpanded &&
+                    (profileSubscriptions.length > 0 ? (
+                      <div className="profile-subscriptions-grid">
+                        {profileSubscriptions.map((sub, index) => {
+                          const state = getSubscriptionState(sub)
+                          return (
+                            <article className="profile-subscription-card" key={sub?.id || `all-${index}`}>
+                              <div className="profile-subscription-head">
+                                <strong>{subscriptionTitle(sub)}</strong>
+                                <span className={`profile-subscription-badge ${state.tone}`}>{state.label}</span>
+                              </div>
+                              <div className="profile-subscription-meta">
+                                <span>Начало: {formatDateTime(sub?.started_at)}</span>
+                                <span>До: {formatDateTime(sub?.ends_at)}</span>
+                                <span>Лимит: {sub?.links_limit ?? 0}</span>
+                                <span>Оплата: {sub?.amount_paid ?? 0} ₽</span>
+                              </div>
+                            </article>
+                          )
+                        })}
+                      </div>
+                    ) : (
+                      <div className="profile-empty-card">Нет подписок</div>
+                    ))}
                 </div>
 
                 <div className="profile-section">

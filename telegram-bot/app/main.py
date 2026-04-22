@@ -58,6 +58,7 @@ BTN_STOP_MONITORING = "⏹ Остановить мониторинг"
 BTN_STATUS = "📊 Статус"
 BTN_CHANGE_LINK = "🔗 Поменять ссылку"
 BTN_OPEN_MINIAPP = "📱 Открыть приложение"
+BTN_BUY_SUBSCRIPTION = "Оформить подписку"
 BTN_CANCEL_CHANGE = "✖️ Отмена изменения"
 
 START_COMMAND_TEXT = (
@@ -118,6 +119,14 @@ def miniapp_keyboard(telegram_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text=BTN_OPEN_MINIAPP, web_app=WebAppInfo(url=build_miniapp_url(telegram_id)))],
+        ]
+    )
+
+
+def buy_subscription_keyboard(telegram_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=BTN_BUY_SUBSCRIPTION, web_app=WebAppInfo(url=build_miniapp_url(telegram_id)))],
         ]
     )
 
@@ -798,6 +807,14 @@ def build_router(bot_id: int, backend: BackendAPI, *, is_primary: bool = False) 
                 reply_markup=monitoring_actions_keyboard(message.from_user.id),
             )
             await _pin_monitoring_link(message.bot, chat_id=message.from_user.id, monitoring_url=payload.get("url"))
+            return
+        if status_code == 402:
+            await _answer_with_static_photo(
+                message,
+                "Подписка закончилась. Нажмите «Оформить подписку», чтобы продолжить мониторинг.",
+                photo_key="error",
+                reply_markup=buy_subscription_keyboard(message.from_user.id),
+            )
             return
         await _answer_with_static_photo(
             message,

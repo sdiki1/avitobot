@@ -374,14 +374,22 @@ def set_miniapp_content_settings(db: Session, updates: dict[str, str]) -> dict[s
     return get_miniapp_content_settings(db)
 
 
-def _send_telegram_message(bot_token: str, chat_id: int, text: str) -> bool:
-    payload = json.dumps(
-        {
-            "chat_id": chat_id,
-            "text": text,
-            "disable_web_page_preview": True,
-        }
-    ).encode("utf-8")
+def _send_telegram_message(
+    bot_token: str,
+    chat_id: int,
+    text: str,
+    *,
+    reply_markup: dict[str, Any] | None = None,
+    disable_web_page_preview: bool = True,
+) -> bool:
+    payload_data: dict[str, Any] = {
+        "chat_id": chat_id,
+        "text": text,
+        "disable_web_page_preview": disable_web_page_preview,
+    }
+    if reply_markup:
+        payload_data["reply_markup"] = reply_markup
+    payload = json.dumps(payload_data).encode("utf-8")
     req = urllib_request.Request(
         f"https://api.telegram.org/bot{bot_token}/sendMessage",
         data=payload,
@@ -508,7 +516,76 @@ def send_subscription_assigned_bot_message(db: Session, user: User) -> bool:
     return _send_telegram_message(primary_bot.bot_token, user.telegram_id, text)
 
 
-def send_monitoring_bot_message(db: Session, monitoring: Monitoring, telegram_id: int, text: str) -> bool:
+def _build_bot_link(bot_username: str | None) -> str | None:
+    username = str(bot_username or "").strip().lstrip("@")
+    if not username:
+        return None
+    return f"https://t.me/{username}"
+
+
+def build_subscription_purchase_url(db: Session) -> str | None:
+    primary_bot = db.scalar(
+        select(TelegramBot)
+        .where(
+            and_(
+                TelegramBot.is_primary.is_(True),
+                TelegramBot.is_active.is_(True),
+                TelegramBot.bot_username.is_not(None),
+            )
+        )
+        .order_by(TelegramBot.id.asc())
+    )
+    if primary_bot:
+        base = _build_bot_link(primary_bot.bot_username)
+        if base:
+            separator = "&" if "?" in base else "?"
+            return f"{base}{separator}start=subscription"
+
+    fallback_bot = db.scalar(
+        select(TelegramBot)
+        .where(
+            and_(
+                TelegramBot.is_active.is_(True),
+                TelegramBot.bot_username.is_not(None),
+            )
+        )
+        .order_by(TelegramBot.id.asc())
+    )
+    if fallback_bot:
+        base = _build_bot_link(fallback_bot.bot_username)
+        if base:
+            separator = "&" if "?" in base else "?"
+            return f"{base}{separator}start=subscription"
+
+    fallback_url = str(settings.miniapp_public_url or "").strip()
+    return fallback_url or None
+
+
+def build_subscription_cta_markup(db: Session, button_text: str = "Оформить подписку") -> dict[str, Any] | None:
+    target_url = build_subscription_purchase_url(db)
+    if not target_url:
+        return None
+    caption = str(button_text or "").strip() or "Оформить подписку"
+    return {
+        "inline_keyboard": [
+            [
+                {
+                    "text": caption,
+                    "url": target_url,
+                }
+            ]
+        ]
+    }
+
+
+def send_monitoring_bot_message(
+    db: Session,
+    monitoring: Monitoring,
+    telegram_id: int,
+    text: str,
+    *,
+    reply_markup: dict[str, Any] | None = None,
+) -> bool:
     if not monitoring.bot_id or not text or not text.strip():
         return False
 
@@ -518,7 +595,12 @@ def send_monitoring_bot_message(db: Session, monitoring: Monitoring, telegram_id
     if not bot or not bot.bot_token:
         return False
 
-    return _send_telegram_message(bot.bot_token, telegram_id, text)
+    return _send_telegram_message(
+        bot.bot_token,
+        telegram_id,
+        text,
+        reply_markup=reply_markup,
+    )
 
 
 def seconds_to_human(delta_seconds: int) -> str:

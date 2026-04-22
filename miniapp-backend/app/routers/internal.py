@@ -19,6 +19,7 @@ from app.schemas import (
 )
 from app.services.auth import require_internal_token
 from app.services.helpers import (
+    build_subscription_cta_markup,
     extract_item_description,
     extract_item_photo_url,
     format_new_item_message,
@@ -27,6 +28,7 @@ from app.services.helpers import (
     normalize_monitoring_url,
     normalize_proxy_url,
     now_utc,
+    send_monitoring_bot_message,
 )
 from app.services.notification_queue import enqueue_notification, purge_monitoring_notifications
 
@@ -97,6 +99,32 @@ def _clear_monitoring_notifications(db: Session, monitoring: Monitoring) -> tupl
     if monitoring.bot_id:
         cleared_queue = int(purge_monitoring_notifications(int(monitoring.bot_id), int(monitoring.id)) or 0)
     return cleared_pending, cleared_queue
+
+
+def _stop_monitoring_due_subscription_expired(db: Session, monitoring: Monitoring, user: User | None) -> bool:
+    if not monitoring.is_active:
+        return False
+
+    _clear_monitoring_notifications(db, monitoring)
+    monitoring.is_active = False
+    monitoring.notify_since_at = None
+    db.commit()
+    db.refresh(monitoring)
+
+    if user and user.telegram_id:
+        title = (monitoring.title or f"Мониторинг #{monitoring.id}").strip()
+        text = (
+            f"⏹ Мониторинг «{title}» остановлен.\n"
+            "Срок подписки закончился. Чтобы возобновить мониторинг, оформите новую подписку."
+        )
+        send_monitoring_bot_message(
+            db,
+            monitoring,
+            int(user.telegram_id),
+            text,
+            reply_markup=build_subscription_cta_markup(db),
+        )
+    return True
 
 
 @router.get("/bots/active", response_model=list[InternalBotConfigResponse])
@@ -192,11 +220,12 @@ def active_monitorings(db: Session = Depends(get_db)) -> list[dict]:
                 and_(
                     UserSubscription.user_id == user.id,
                     UserSubscription.status == "active",
-                    UserSubscription.ends_at > now_utc(),
+                    UserSubscription.ends_at > now,
                 )
             )
         )
         if not active_subscription:
+            _stop_monitoring_due_subscription_expired(db, mon, user)
             continue
         proxy_pool: list[str] = []
         proxy_url = None
@@ -396,12 +425,27 @@ def monitoring_state(monitoring_id: int, db: Session = Depends(get_db)) -> dict:
     if not monitoring:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Monitoring not found")
     user = db.get(User, monitoring.user_id)
+    now = now_utc()
+    active_subscription = None
+    if user:
+        active_subscription = db.scalar(
+            select(UserSubscription).where(
+                and_(
+                    UserSubscription.user_id == user.id,
+                    UserSubscription.status == "active",
+                    UserSubscription.ends_at > now,
+                )
+            )
+        )
+    if monitoring.is_active and not active_subscription:
+        _stop_monitoring_due_subscription_expired(db, monitoring, user)
     return {
         "monitoring_id": monitoring.id,
         "is_active": bool(monitoring.is_active),
         "link_configured": bool(monitoring.link_configured),
         "telegram_id": user.telegram_id if user else None,
         "bot_id": monitoring.bot_id,
+        "subscription_active": bool(active_subscription),
     }
 
 
