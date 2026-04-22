@@ -26,8 +26,8 @@ const SUBSCRIPTION_VIEW = {
 }
 
 const TYPE_OPTIONS = [
-  { id: 'standard', label: 'Стандартная', speed: '1.8 секунд' },
-  { id: 'speed', label: 'Скоростная', speed: '0.1 секунда' },
+  { id: 'standard', label: 'Обычная', hint: 'стандартный режим' },
+  { id: 'speed', label: 'Ускоренная', hint: 'приоритетный режим' },
 ]
 
 const PARAM_OPTIONS = [
@@ -186,9 +186,18 @@ function normalizePlanName(value) {
 }
 
 function detectPlanType(plan) {
+  const byFormat = String(plan?.plan_format || '').trim().toLowerCase()
+  if (byFormat.startsWith('speed') || byFormat.startsWith('ускор') || byFormat.startsWith('скорост')) return 'speed'
+  if (byFormat.startsWith('standard') || byFormat.startsWith('обыч') || byFormat.startsWith('стандарт')) return 'standard'
   const normalized = normalizePlanName(plan?.name)
-  if (normalized.startsWith('скорост')) return 'speed'
+  if (normalized.startsWith('скорост') || normalized.startsWith('ускор')) return 'speed'
   return 'standard'
+}
+
+function getPlanDurationLabel(plan) {
+  const label = String(plan?.duration_label || '').trim()
+  if (label) return label
+  return `${Number(plan?.duration_days || 0)} дней`
 }
 
 function normalizeParamFlags(monitoring) {
@@ -224,6 +233,7 @@ export default function App() {
   const [pendingPaymentId, setPendingPaymentId] = useState(null)
   const [pendingPaymentUrl, setPendingPaymentUrl] = useState('')
   const [selectedType, setSelectedType] = useState(TYPE_OPTIONS[0].id)
+  const [selectedPlanId, setSelectedPlanId] = useState(null)
   const [useReferralBalance, setUseReferralBalance] = useState(false)
   const [buyDraft, setBuyDraft] = useState({ title: '', url: '' })
 
@@ -262,13 +272,47 @@ export default function App() {
     [normalizedMonitorings, selectedMonitoringId],
   )
 
-  const selectedPlan = useMemo(() => {
-    const byType = plans
+  const plansBySelectedType = useMemo(() => {
+    return plans
       .filter((plan) => detectPlanType(plan) === selectedType)
-      .sort((a, b) => Number(a.id || 0) - Number(b.id || 0))
-    if (byType.length > 0) return byType[0]
-    return plans[0] || null
+      .sort((a, b) => {
+        const byDuration = Number(a.duration_days || 0) - Number(b.duration_days || 0)
+        if (byDuration !== 0) return byDuration
+        const byPrice = Number(a.price_rub || 0) - Number(b.price_rub || 0)
+        if (byPrice !== 0) return byPrice
+        return Number(a.id || 0) - Number(b.id || 0)
+      })
   }, [plans, selectedType])
+
+  useEffect(() => {
+    if (!plans.length) return
+    const hasCurrentType = plans.some((plan) => detectPlanType(plan) === selectedType)
+    if (!hasCurrentType) {
+      setSelectedType(detectPlanType(plans[0]))
+    }
+  }, [plans, selectedType])
+
+  useEffect(() => {
+    if (plansBySelectedType.length === 0) {
+      setSelectedPlanId(null)
+      return
+    }
+    const hasSelected = plansBySelectedType.some((plan) => Number(plan.id) === Number(selectedPlanId))
+    if (!hasSelected) {
+      setSelectedPlanId(Number(plansBySelectedType[0].id))
+    }
+  }, [plansBySelectedType, selectedPlanId])
+
+  const selectedPlan = useMemo(() => {
+    if (plansBySelectedType.length === 0) return plans[0] || null
+    const byId = plansBySelectedType.find((plan) => Number(plan.id) === Number(selectedPlanId))
+    return byId || plansBySelectedType[0]
+  }, [plans, plansBySelectedType, selectedPlanId])
+
+  const selectedPlanDurationLabel = useMemo(() => {
+    if (!selectedPlan) return '—'
+    return getPlanDurationLabel(selectedPlan)
+  }, [selectedPlan])
 
   const referralBalance = profile?.user?.referral_balance_rub ?? 0
   const basePrice = Number(selectedPlan?.price_rub || 0)
@@ -848,11 +892,33 @@ export default function App() {
                     key={option.id}
                     type="button"
                     className={`choice-row ${selectedType === option.id ? 'active' : ''}`}
-                    onClick={() => setSelectedType(option.id)}
+                    onClick={() => {
+                      setSelectedType(option.id)
+                      setSelectedPlanId(null)
+                    }}
                   >
                     <span className="choice-dot" />
                     <span className="choice-main">{option.label}</span>
-                    <span className="choice-meta">({option.speed})</span>
+                    <span className="choice-meta">({option.hint})</span>
+                  </button>
+                ))}
+              </div>
+
+              <h2 className="section-title">Срок и стоимость</h2>
+              <div className="choices-list">
+                {plansBySelectedType.length === 0 && (
+                  <div className="empty-card">Для выбранного формата тарифы пока не настроены.</div>
+                )}
+                {plansBySelectedType.map((plan) => (
+                  <button
+                    key={plan.id}
+                    type="button"
+                    className={`choice-row ${Number(selectedPlan?.id) === Number(plan.id) ? 'active' : ''}`}
+                    onClick={() => setSelectedPlanId(Number(plan.id))}
+                  >
+                    <span className="choice-dot" />
+                    <span className="choice-main">{getPlanDurationLabel(plan)}</span>
+                    <span className="choice-meta">{Number(plan.price_rub || 0)} ₽ · {Number(plan.duration_days || 0)} дн.</span>
                   </button>
                 ))}
               </div>
@@ -878,7 +944,7 @@ export default function App() {
 
               <div className="buy-summary">
                 <div className="summary-balance">Тариф: {selectedPlan?.name || '—'}</div>
-                <div className="summary-balance">Срок: {selectedPlan?.duration_days ?? 0} дней</div>
+                <div className="summary-balance">Срок: {selectedPlanDurationLabel} ({selectedPlan?.duration_days ?? 0} дней)</div>
                 <div className="summary-balance">Цена тарифа: {basePrice}₽</div>
                 <div className="summary-total">Итог: {totalPrice}₽</div>
                 <div className="summary-balance">Реф. баланс: {referralBalance}₽</div>

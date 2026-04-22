@@ -101,6 +101,20 @@ def _ensure_primary_bot_exists(db: Session) -> None:
         first_bot.is_primary = True
 
 
+def _normalize_plan_format(value: str | None) -> str:
+    normalized = (value or "").strip().lower()
+    if normalized.startswith("speed") or normalized.startswith("ускор") or normalized.startswith("скорост"):
+        return "speed"
+    return "standard"
+
+
+def _normalize_duration_label(value: str | None, duration_days: int) -> str:
+    label = (value or "").strip()
+    if label:
+        return label
+    return f"{int(duration_days)} дней"
+
+
 @router.get("/stats")
 def stats(db: Session = Depends(get_db)) -> dict:
     users_count = db.scalar(select(func.count(User.id))) or 0
@@ -409,7 +423,10 @@ def list_plans(db: Session = Depends(get_db)) -> list[TariffPlan]:
 
 @router.post("/plans", response_model=TariffPlanResponse)
 def create_plan(payload: TariffPlanCreate, db: Session = Depends(get_db)) -> TariffPlan:
-    plan = TariffPlan(**payload.model_dump())
+    payload_data = payload.model_dump()
+    payload_data["plan_format"] = _normalize_plan_format(payload_data.get("plan_format"))
+    payload_data["duration_label"] = _normalize_duration_label(payload_data.get("duration_label"), int(payload_data["duration_days"]))
+    plan = TariffPlan(**payload_data)
     db.add(plan)
     db.commit()
     db.refresh(plan)
@@ -422,8 +439,17 @@ def update_plan(plan_id: int, payload: TariffPlanUpdate, db: Session = Depends(g
     if not plan:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
 
-    for key, value in payload.model_dump(exclude_none=True).items():
+    update_data = payload.model_dump(exclude_none=True)
+    if "plan_format" in update_data:
+        update_data["plan_format"] = _normalize_plan_format(update_data.get("plan_format"))
+    if "duration_label" in update_data:
+        duration_days = int(update_data.get("duration_days") or plan.duration_days)
+        update_data["duration_label"] = _normalize_duration_label(update_data.get("duration_label"), duration_days)
+
+    for key, value in update_data.items():
         setattr(plan, key, value)
+    if not (plan.duration_label or "").strip():
+        plan.duration_label = _normalize_duration_label(None, int(plan.duration_days))
     db.commit()
     db.refresh(plan)
     return plan

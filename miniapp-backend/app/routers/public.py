@@ -123,11 +123,6 @@ def _miniapp_content_response(values: dict[str, str]) -> MiniAppContentResponse:
     )
 
 
-def _is_miniapp_plan_name(name: str | None) -> bool:
-    normalized = (name or "").strip().lower()
-    return normalized.startswith("стандарт") or normalized.startswith("скорост")
-
-
 def _require_active_subscription(db: Session, user_id: int) -> UserSubscription:
     active_sub = db.scalar(get_active_subscription_query(user_id))
     if not active_sub:
@@ -497,9 +492,18 @@ def onboarding_trial(
 
 @router.get("/plans", response_model=list[TariffPlanResponse])
 def list_plans(db: Session = Depends(get_db)) -> list[TariffPlan]:
-    plans = list(db.scalars(select(TariffPlan).where(TariffPlan.is_active.is_(True)).order_by(TariffPlan.price_rub.asc())))
-    only_miniapp = [plan for plan in plans if _is_miniapp_plan_name(plan.name)]
-    return only_miniapp or plans
+    return list(
+        db.scalars(
+            select(TariffPlan)
+            .where(TariffPlan.is_active.is_(True))
+            .order_by(
+                TariffPlan.plan_format.asc(),
+                TariffPlan.duration_days.asc(),
+                TariffPlan.price_rub.asc(),
+                TariffPlan.id.asc(),
+            )
+        )
+    )
 
 
 @router.get("/miniapp-content", response_model=MiniAppContentResponse)
@@ -824,8 +828,13 @@ def purchase_subscription(
         user.referral_balance_rub = current_balance - referral_used
 
     amount_to_pay = max(0, total_price - referral_used)
+    plan_format_raw = (plan.plan_format or "").strip().lower()
+    plan_subscription_type = "speed" if plan_format_raw.startswith("speed") else "standard"
+    if plan_subscription_type not in {"speed", "standard"}:
+        plan_subscription_type = "speed" if (payload.subscription_type or "").strip().lower().startswith("speed") else "standard"
+
     purchase_payload = {
-        "subscription_type": "speed" if (payload.subscription_type or "").strip().lower().startswith("speed") else "standard",
+        "subscription_type": plan_subscription_type,
         "duration_days": int(plan.duration_days),
         "monitoring_id": target_monitoring.id if target_monitoring else None,
         "base_price_rub": base_price,
@@ -841,8 +850,7 @@ def purchase_subscription(
     }
 
     if amount_to_pay <= 0:
-        plan_name_normalized = (plan.name or "").strip().lower()
-        provider = "miniapp_speed" if plan_name_normalized.startswith("скорост") else "miniapp_standard"
+        provider = "miniapp_speed" if plan_subscription_type == "speed" else "miniapp_standard"
         if referral_used > 0:
             provider = f"{provider}_with_ref"
 

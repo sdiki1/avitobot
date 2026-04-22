@@ -12,6 +12,8 @@ from app.services.helpers import DEFAULT_TRIAL_DAYS, MINIAPP_CONTENT_DEFAULTS, T
 DEFAULT_PLANS = [
     {
         "name": "Стандартная",
+        "plan_format": "standard",
+        "duration_label": "30 дней",
         "description": "Стандартная подписка",
         "links_limit": 1,
         "duration_days": 30,
@@ -19,6 +21,8 @@ DEFAULT_PLANS = [
     },
     {
         "name": "Скоростная",
+        "plan_format": "speed",
+        "duration_label": "30 дней",
         "description": "Скоростная подписка",
         "links_limit": 1,
         "duration_days": 30,
@@ -138,6 +142,20 @@ def init_db() -> None:
         conn.exec_driver_sql("ALTER TABLE user_subscriptions ADD COLUMN IF NOT EXISTS is_trial BOOLEAN DEFAULT FALSE")
         conn.exec_driver_sql("UPDATE user_subscriptions SET is_trial = FALSE WHERE is_trial IS NULL")
 
+        conn.exec_driver_sql("ALTER TABLE tariff_plans ADD COLUMN IF NOT EXISTS plan_format VARCHAR(32)")
+        conn.exec_driver_sql("ALTER TABLE tariff_plans ADD COLUMN IF NOT EXISTS duration_label VARCHAR(255)")
+        conn.exec_driver_sql(
+            "UPDATE tariff_plans SET plan_format = CASE "
+            "WHEN LOWER(COALESCE(name, '')) LIKE 'скорост%%' OR LOWER(COALESCE(name, '')) LIKE 'ускор%%' THEN 'speed' "
+            "WHEN LOWER(COALESCE(name, '')) LIKE 'speed%%' THEN 'speed' "
+            "ELSE 'standard' END "
+            "WHERE plan_format IS NULL OR NULLIF(TRIM(plan_format), '') IS NULL"
+        )
+        conn.exec_driver_sql(
+            "UPDATE tariff_plans SET duration_label = CONCAT(duration_days::text, ' дней') "
+            "WHERE duration_label IS NULL OR NULLIF(TRIM(duration_label), '') IS NULL"
+        )
+
         conn.exec_driver_sql("ALTER TABLE proxies ADD COLUMN IF NOT EXISTS cooldown_until TIMESTAMP WITH TIME ZONE")
         conn.exec_driver_sql("ALTER TABLE proxies ADD COLUMN IF NOT EXISTS last_blocked_at TIMESTAMP WITH TIME ZONE")
         conn.exec_driver_sql("ALTER TABLE proxies ADD COLUMN IF NOT EXISTS last_block_status INTEGER")
@@ -149,6 +167,10 @@ def seed_default_plans(db: Session) -> None:
     for plan in DEFAULT_PLANS:
         existing = db.scalar(select(TariffPlan).where(TariffPlan.name == plan["name"]))
         if existing:
+            if not (existing.plan_format or "").strip():
+                existing.plan_format = plan["plan_format"]
+            if not (existing.duration_label or "").strip():
+                existing.duration_label = plan["duration_label"]
             continue
         db.add(TariffPlan(**plan))
 

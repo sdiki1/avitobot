@@ -1,9 +1,8 @@
 <%- include('partials/header', { title: 'Тарифы' }) %>
 
 <section class="card">
-  <h1>Тарифы Mini App</h1>
-  <p class="muted">В этом разделе доступны только типы из miniapp: «Стандартная» и «Скоростная».</p>
-  <p class="muted">Стоимость каждого тарифа задается отдельно в его карточке.</p>
+  <h1>Тарифы</h1>
+  <p class="muted">Создавайте и редактируйте тарифы: формат, срок, цена и лимит мониторингов.</p>
 
   <% if (success) { %>
     <div class="alert info"><%= success %></div>
@@ -11,46 +10,74 @@
   <% if (error) { %>
     <div class="alert error"><%= error %></div>
   <% } %>
-  <% if (hiddenPlansCount > 0) { %>
-    <p class="muted">Скрыто нестандартных тарифов: <strong><%= hiddenPlansCount %></strong></p>
-  <% } %>
+
+  <h2>Добавить тариф</h2>
+  <form class="form-grid" action="<%= adminBase %>/plans" method="post">
+    <select name="plan_format" required>
+      <option value="standard"><%= planFormatLabels.standard %></option>
+      <option value="speed"><%= planFormatLabels.speed %></option>
+    </select>
+    <input name="duration_label" placeholder="Название срока (например: Неделя)" required />
+    <input name="duration_days" type="number" min="1" placeholder="Срок в днях" required />
+    <input name="price_rub" type="number" min="0" placeholder="Стоимость, ₽" required />
+    <input name="links_limit" type="number" min="1" value="1" placeholder="Лимит мониторингов" required />
+    <input name="description" placeholder="Описание (опционально)" />
+    <label>
+      <input type="checkbox" name="is_active" checked /> Активен
+    </label>
+    <button type="submit">Добавить</button>
+  </form>
 </section>
 
 <section class="card">
-  <h2>Редактирование тарифов</h2>
+  <h2>Список тарифов</h2>
   <div class="table-wrap">
     <table class="table">
       <thead>
         <tr>
-          <th>Тип</th>
+          <th>ID</th>
+          <th>Формат / срок</th>
           <th>Параметры</th>
           <th>Управление</th>
         </tr>
       </thead>
       <tbody>
       <% plans.forEach((plan) => { %>
+        <%
+          const format = String(plan.plan_format || '').toLowerCase().startsWith('speed') ? 'speed' : 'standard';
+          const durationLabel = (plan.duration_label && String(plan.duration_label).trim()) || `${plan.duration_days} дней`;
+        %>
         <tr>
+          <td><strong><%= plan.id %></strong></td>
           <td>
-            <strong><%= plan.name %></strong><br />
-            <span class="muted"><%= plan.id ? `ID ${plan.id}` : 'Будет создан при сохранении' %></span>
+            <strong><%= format === 'speed' ? planFormatLabels.speed : planFormatLabels.standard %></strong><br />
+            <span class="muted"><%= durationLabel %></span><br />
+            <span class="muted">Отображается как: <%= plan.name %></span>
           </td>
           <td>
-            <span class="muted"><%= plan.links_limit %> ссылок · <%= plan.duration_days %> дней · <%= plan.price_rub %> ₽</span><br />
+            <span class="muted">
+              <%= plan.price_rub %> ₽ · <%= plan.duration_days %> дней · лимит <%= plan.links_limit %>
+            </span><br />
             <span class="badge <%= plan.is_active ? 'active' : 'disabled' %>"><%= plan.is_active ? 'active' : 'disabled' %></span>
           </td>
           <td>
-            <form class="form-grid two" action="<%= adminBase %>/plans/miniapp/<%= plan.key %>/save" method="post">
-              <input type="hidden" name="plan_id" value="<%= plan.id || '' %>" />
-              <input name="description" value="<%= plan.description || '' %>" placeholder="Описание" />
-              <input name="links_limit" type="number" value="<%= plan.links_limit %>" required />
-              <input name="duration_days" type="number" value="<%= plan.duration_days %>" required />
-              <input name="price_rub" type="number" value="<%= plan.price_rub %>" required />
+            <form class="form-grid two" action="<%= adminBase %>/plans/<%= plan.id %>/update" method="post">
+              <select name="plan_format" required>
+                <option value="standard" <%= format === 'standard' ? 'selected' : '' %>><%= planFormatLabels.standard %></option>
+                <option value="speed" <%= format === 'speed' ? 'selected' : '' %>><%= planFormatLabels.speed %></option>
+              </select>
+              <input name="duration_label" value="<%= durationLabel %>" required />
+              <input name="duration_days" type="number" min="1" value="<%= plan.duration_days %>" required />
+              <input name="price_rub" type="number" min="0" value="<%= plan.price_rub %>" required />
+              <input name="links_limit" type="number" min="1" value="<%= plan.links_limit %>" required />
+              <input name="description" value="<%= plan.description || '' %>" placeholder="Описание (опционально)" />
               <label>
                 <input type="checkbox" name="is_active" <%= plan.is_active ? 'checked' : '' %> /> Активен
               </label>
-              <div class="actions">
-                <button type="submit">Сохранить</button>
-              </div>
+              <button type="submit">Сохранить</button>
+            </form>
+            <form action="<%= adminBase %>/plans/<%= plan.id %>/delete" method="post">
+              <button class="danger" type="submit">Удалить</button>
             </form>
           </td>
         </tr>

@@ -71,6 +71,8 @@ class BotReference(BaseModel):
 
 class TariffPlanBase(BaseModel):
     name: str = Field(min_length=2, max_length=255)
+    plan_format: str = Field(default="standard", min_length=3, max_length=32)
+    duration_label: str | None = Field(default=None, max_length=255)
     description: str | None = None
     links_limit: int = Field(gt=0)
     duration_days: int = Field(gt=0)
@@ -84,6 +86,8 @@ class TariffPlanCreate(TariffPlanBase):
 
 class TariffPlanUpdate(BaseModel):
     name: str | None = None
+    plan_format: str | None = Field(default=None, min_length=3, max_length=32)
+    duration_label: str | None = Field(default=None, max_length=255)
     description: str | None = None
     links_limit: int | None = Field(default=None, gt=0)
     duration_days: int | None = Field(default=None, gt=0)

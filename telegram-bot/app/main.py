@@ -78,10 +78,19 @@ START_COMMAND_TEXT = (
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 STATIC_MESSAGE_PHOTOS = {
-    "error": PROJECT_ROOT / "msg_error.jpeg",
-    "link_change": PROJECT_ROOT / "msg_link_change.jpeg",
-    "monitoring_start": PROJECT_ROOT / "msg_monitoring_start.jpeg",
-    "monitoring_stop": PROJECT_ROOT / "msg_monitoring_stop.png",
+    "error": [
+        PROJECT_ROOT / "msg_error.jpeg",
+    ],
+    "link_change": [
+        PROJECT_ROOT / "msg_link_change.jpeg",
+    ],
+    "monitoring_start": [
+        PROJECT_ROOT / "msg_monitoring_start.jpeg",
+    ],
+    "monitoring_stop": [
+        PROJECT_ROOT / "msg_monitoring_stop.jpeg",
+        PROJECT_ROOT / "msg_monitoring_stop.png",
+    ],
 }
 _logged_missing_static_photo_keys: set[str] = set()
 
@@ -212,13 +221,15 @@ def _fit_photo_caption(value: str, max_len: int = 1024) -> str:
 def _resolve_static_photo_path(photo_key: str | None) -> Path | None:
     if not photo_key:
         return None
-    path = STATIC_MESSAGE_PHOTOS.get(photo_key)
-    if not path or path.exists():
-        return path
+    candidates = STATIC_MESSAGE_PHOTOS.get(photo_key) or []
+    for path in candidates:
+        if path.exists():
+            return path
 
     if photo_key not in _logged_missing_static_photo_keys:
         _logged_missing_static_photo_keys.add(photo_key)
-        logger.warning("Static photo for key='{}' not found at path='{}'", photo_key, path)
+        joined = ", ".join(str(path) for path in candidates) if candidates else "(empty candidates)"
+        logger.warning("Static photo for key='{}' not found. Tried: {}", photo_key, joined)
     return None
 
 
@@ -438,11 +449,22 @@ async def _send_downloaded_photo_with_retry(
 
 
 def _format_plan_line(plan: dict[str, Any]) -> str:
+    plan_format_raw = str(plan.get("plan_format") or "").strip().lower()
+    if plan_format_raw.startswith("speed"):
+        format_label = "Ускоренная"
+    else:
+        format_label = "Обычная"
+    duration_label = str(plan.get("duration_label") or "").strip()
+    if not duration_label:
+        duration_label = f"{plan.get('duration_days')} дней"
     name = str(plan.get("name") or "Тариф")
     price = plan.get("price_rub")
     links_limit = plan.get("links_limit")
     duration_days = plan.get("duration_days")
-    base = f"• {name}: {price}₽ | {links_limit} мониторингов | {duration_days} дней"
+    base = (
+        f"• {format_label} / {duration_label}: {price}₽ | {links_limit} мониторингов | {duration_days} дней\n"
+        f"  Название: {name}"
+    )
     description = str(plan.get("description") or "").strip()
     if description:
         return f"{base}\n{description}"
