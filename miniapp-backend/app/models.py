@@ -1,10 +1,11 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import (
     JSON,
     BigInteger,
     Boolean,
     DateTime,
+    Date,
     ForeignKey,
     Integer,
     String,
@@ -164,6 +165,8 @@ class ProxyConfig(Base):
     cooldown_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_blocked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_block_status: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    expires_on: Mapped[date | None] = mapped_column(Date, nullable=True)
+    expiry_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

@@ -48,6 +48,11 @@ function toInt(value) {
   return Number.isNaN(parsed) ? null : parsed;
 }
 
+function normalizeDateInput(value) {
+  const raw = String(value || '').trim();
+  return raw || null;
+}
+
 function normalizePlanName(value) {
   return String(value || '').trim().toLowerCase();
 }
@@ -192,10 +197,11 @@ router.post('/proxies', async (req, res) => {
       proxy_url: req.body.proxy_url,
       change_ip_url: req.body.change_ip_url || null,
       is_active: req.body.is_active === 'on',
+      expires_on: normalizeDateInput(req.body.expires_on),
     });
     res.redirect(withAdminBase('/proxies?success=Прокси+добавлен'));
   } catch (error) {
-    res.redirect(withAdminBase(`/proxies?success=${encodeURIComponent(`Ошибка: ${error.message}`)}`));
+    res.redirect(withAdminBase(`/proxies?error=${encodeURIComponent(`Ошибка: ${error.message}`)}`));
   }
 });
 
@@ -206,10 +212,22 @@ router.post('/proxies/:id/update', async (req, res) => {
       proxy_url: req.body.proxy_url,
       change_ip_url: req.body.change_ip_url || null,
       is_active: req.body.is_active === 'on',
+      expires_on: normalizeDateInput(req.body.expires_on),
     });
     res.redirect(withAdminBase('/proxies?success=Прокси+обновлен'));
   } catch (error) {
-    res.redirect(withAdminBase(`/proxies?success=${encodeURIComponent(`Ошибка: ${error.message}`)}`));
+    res.redirect(withAdminBase(`/proxies?error=${encodeURIComponent(`Ошибка: ${error.message}`)}`));
+  }
+});
+
+router.post('/proxies/:id/active', async (req, res) => {
+  try {
+    await api.updateProxy(req.params.id, {
+      is_active: Boolean(req.body.is_active),
+    });
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(400).json({ ok: false, error: error.message });
   }
 });
 
@@ -218,16 +236,40 @@ router.post('/proxies/:id/delete', async (req, res) => {
     await api.deleteProxy(req.params.id);
     res.redirect(withAdminBase('/proxies?success=Прокси+удален'));
   } catch (error) {
-    res.redirect(withAdminBase(`/proxies?success=${encodeURIComponent(`Ошибка: ${error.message}`)}`));
+    res.redirect(withAdminBase(`/proxies?error=${encodeURIComponent(`Ошибка: ${error.message}`)}`));
   }
 });
 
 router.get('/users', async (req, res) => {
   try {
     const users = await api.getUsers();
-    res.render('users', { users, error: null });
+    res.render('users', { users, error: null, success: req.query.success || null });
   } catch (error) {
-    res.render('users', { users: [], error: error.message });
+    res.render('users', { users: [], error: error.message, success: null });
+  }
+});
+
+router.post('/users/admins', async (req, res) => {
+  try {
+    await api.addAdminUser({
+      telegram_id: toInt(req.body.telegram_id),
+      username: req.body.username || null,
+      full_name: req.body.full_name || null,
+    });
+    res.redirect(withAdminBase('/users?success=Администратор+добавлен'));
+  } catch (error) {
+    res.redirect(withAdminBase(`/users?error=${encodeURIComponent(`Ошибка: ${error.message}`)}`));
+  }
+});
+
+router.post('/users/:id/admin', async (req, res) => {
+  try {
+    await api.updateUserAdmin(req.params.id, {
+      is_admin: Boolean(req.body.is_admin),
+    });
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(400).json({ ok: false, error: error.message });
   }
 });
 

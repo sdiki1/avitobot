@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, Field
 
@@ -165,6 +165,7 @@ class ProxyCreate(BaseModel):
     proxy_url: str
     change_ip_url: str | None = None
     is_active: bool = True
+    expires_on: date | None = None
 
 
 class ProxyUpdate(BaseModel):
@@ -172,6 +173,7 @@ class ProxyUpdate(BaseModel):
     proxy_url: str | None = None
     change_ip_url: str | None = None
     is_active: bool | None = None
+    expires_on: date | None = None
 
 
 class ProxyResponse(BaseModel):
@@ -184,9 +186,21 @@ class ProxyResponse(BaseModel):
     cooldown_until: datetime | None = None
     last_blocked_at: datetime | None = None
     last_block_status: int | None = None
+    expires_on: date | None = None
+    expiry_notified_at: datetime | None = None
 
     class Config:
         from_attributes = True
+
+
+class AdminUserCreate(BaseModel):
+    telegram_id: int
+    username: str | None = None
+    full_name: str | None = None
+
+
+class AdminUserUpdate(BaseModel):
+    is_admin: bool
 
 
 class PaymentCreate(BaseModel):

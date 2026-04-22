@@ -13,7 +13,7 @@ from sqlalchemy import Select, and_, func, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.models import AppSetting, Monitoring, TariffPlan, TelegramBot, User, UserSubscription
+from app.models import AppSetting, Monitoring, ProxyConfig, TariffPlan, TelegramBot, User, UserSubscription
 
 logger = logging.getLogger(__name__)
 TRIAL_DAYS_SETTING_KEY = "trial_days"
@@ -424,6 +424,46 @@ def send_admin_event_message(db: Session, text: str) -> int:
         if _send_telegram_message(primary_bot.bot_token, chat_id, text):
             sent += 1
     return sent
+
+
+def notify_expiring_proxies(db: Session) -> int:
+    today = now_utc().date()
+    tomorrow = today + timedelta(days=1)
+    candidates = db.scalars(
+        select(ProxyConfig)
+        .where(
+            and_(
+                ProxyConfig.is_active.is_(True),
+                ProxyConfig.expires_on.is_not(None),
+                ProxyConfig.expiry_notified_at.is_(None),
+                ProxyConfig.expires_on <= tomorrow,
+                ProxyConfig.expires_on >= today,
+            )
+        )
+        .order_by(ProxyConfig.expires_on.asc(), ProxyConfig.id.asc())
+    ).all()
+    if not candidates:
+        return 0
+
+    notified = 0
+    for proxy in candidates:
+        if not proxy.expires_on:
+            continue
+        days_left = (proxy.expires_on - today).days
+        expires_label = "завтра" if days_left == 1 else "сегодня"
+        message = (
+            "Прокси скоро истечет.\n"
+            f"Название: {proxy.name}\n"
+            f"Прокси: {proxy.proxy_url}\n"
+            f"Действует до: {proxy.expires_on.strftime('%d.%m.%Y')} ({expires_label})"
+        )
+        if send_admin_event_message(db, message) > 0:
+            proxy.expiry_notified_at = now_utc()
+            notified += 1
+
+    if notified:
+        db.commit()
+    return notified
 
 
 def send_subscription_assigned_bot_message(db: Session, user: User) -> bool:

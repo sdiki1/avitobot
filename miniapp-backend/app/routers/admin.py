@@ -6,22 +6,24 @@ from app.database import get_db
 from app.models import Monitoring, Payment, ProxyConfig, TariffPlan, TelegramBot, User, UserSubscription
 from app.schemas import (
     ActivateSubscriptionRequest,
+    AdminUserCreate,
+    AdminUserUpdate,
     MiniAppContentResponse,
     MiniAppContentUpdate,
+    MonitoringAdminUpdate,
     PaymentCreate,
     PaymentResponse,
-    MonitoringAdminUpdate,
     ProxyCreate,
     ProxyResponse,
     ProxyUpdate,
+    TariffPlanCreate,
+    TariffPlanResponse,
+    TariffPlanUpdate,
     TelegramBotCreate,
     TelegramBotResponse,
     TelegramBotUpdate,
     TrialSettingsResponse,
     TrialSettingsUpdate,
-    TariffPlanCreate,
-    TariffPlanResponse,
-    TariffPlanUpdate,
 )
 from app.services.auth import require_admin_token
 from app.services.helpers import (
@@ -180,9 +182,50 @@ def users(db: Session = Depends(get_db)) -> list[dict]:
                 "full_name": user.full_name,
                 "created_at": user.created_at,
                 "active_links": active_links,
+                "is_admin": user.is_admin,
             }
         )
     return result
+
+
+@router.post("/users/admins")
+def add_admin_user(payload: AdminUserCreate, db: Session = Depends(get_db)) -> dict:
+    user = get_or_create_user(
+        db,
+        payload.telegram_id,
+        username=(payload.username or None),
+        full_name=(payload.full_name or None),
+    )
+    if not user.is_admin:
+        user.is_admin = True
+        db.commit()
+        db.refresh(user)
+
+    return {
+        "id": user.id,
+        "telegram_id": user.telegram_id,
+        "username": user.username,
+        "full_name": user.full_name,
+        "is_admin": user.is_admin,
+    }
+
+
+@router.put("/users/{user_id}/admin")
+def update_user_admin(user_id: int, payload: AdminUserUpdate, db: Session = Depends(get_db)) -> dict:
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    user.is_admin = payload.is_admin
+    db.commit()
+    db.refresh(user)
+    return {
+        "id": user.id,
+        "telegram_id": user.telegram_id,
+        "username": user.username,
+        "full_name": user.full_name,
+        "is_admin": user.is_admin,
+    }
 
 
 @router.get("/monitorings")
@@ -416,8 +459,12 @@ def update_proxy(proxy_id: int, payload: ProxyUpdate, db: Session = Depends(get_
     if not proxy:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Proxy not found")
 
-    for key, value in payload.model_dump(exclude_none=True).items():
+    payload_data = payload.model_dump(exclude_unset=True)
+    old_expires_on = proxy.expires_on
+    for key, value in payload_data.items():
         setattr(proxy, key, value)
+    if "expires_on" in payload_data and payload_data.get("expires_on") != old_expires_on:
+        proxy.expiry_notified_at = None
     db.commit()
     db.refresh(proxy)
     return proxy

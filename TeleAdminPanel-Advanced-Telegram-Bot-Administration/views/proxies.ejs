@@ -16,6 +16,7 @@
     <input name="name" placeholder="proxy-main-1" required />
     <input name="proxy_url" placeholder="http://user:pass@host:port" required />
     <input name="change_ip_url" placeholder="URL смены IP (опционально)" />
+    <input type="date" name="expires_on" />
     <label>
       <input type="checkbox" name="is_active" checked /> Активен
     </label>
@@ -32,6 +33,7 @@
           <th>ID</th>
           <th>Прокси</th>
           <th>Источник</th>
+          <th>Срок</th>
           <th>Статус</th>
           <th>Действия</th>
         </tr>
@@ -44,6 +46,7 @@
           const isCooling = Boolean(proxy.is_active && cooldownUntilMs && cooldownUntilMs > Date.now());
           const runtimeClass = !proxy.is_active ? 'disabled' : (isCooling ? 'pending' : 'active');
           const runtimeLabel = !proxy.is_active ? 'disabled' : (isCooling ? 'cooldown' : 'working');
+          const expiresOn = proxy.expires_on ? String(proxy.expires_on).slice(0, 10) : '';
         %>
         <tr>
           <td><%= proxy.id %></td>
@@ -54,6 +57,14 @@
             <span class="muted">Ошибок: <%= proxy.fail_count || 0 %></span>
           </td>
           <td><%= isEnvProxy ? '.env' : 'admin' %></td>
+          <td>
+            <% if (expiresOn) { %>
+              <strong><%= expiresOn %></strong><br />
+              <span class="muted">уведомление за 1 день</span>
+            <% } else { %>
+              <span class="muted">—</span>
+            <% } %>
+          </td>
           <td>
             <span class="badge <%= proxy.is_active ? 'active' : 'disabled' %>"><%= proxy.is_active ? 'active' : 'disabled' %></span>
             <span class="badge <%= runtimeClass %>"><%= runtimeLabel %></span><br />
@@ -69,9 +80,18 @@
               <input name="name" value="<%= proxy.name %>" required />
               <input name="proxy_url" value="<%= proxy.proxy_url %>" required />
               <input name="change_ip_url" value="<%= proxy.change_ip_url || '' %>" />
+              <input type="date" name="expires_on" value="<%= expiresOn %>" />
               <label>
-                <input type="checkbox" name="is_active" <%= proxy.is_active ? 'checked' : '' %> /> Активен
+                <input
+                  type="checkbox"
+                  name="is_active"
+                  class="js-proxy-active"
+                  data-proxy-id="<%= proxy.id %>"
+                  <%= proxy.is_active ? 'checked' : '' %>
+                />
+                Активен
               </label>
+              <span class="muted js-proxy-active-state" data-proxy-id="<%= proxy.id %>"></span>
               <button type="submit">Сохранить</button>
             </form>
             <form action="<%= adminBase %>/proxies/<%= proxy.id %>/delete" method="post">
@@ -84,5 +104,42 @@
     </table>
   </div>
 </section>
+
+<script>
+  (function () {
+    const adminBase = <%- JSON.stringify(adminBase) %>;
+    const toggles = document.querySelectorAll('.js-proxy-active');
+
+    toggles.forEach((toggle) => {
+      toggle.addEventListener('change', async () => {
+        const proxyId = toggle.dataset.proxyId;
+        const info = document.querySelector(`.js-proxy-active-state[data-proxy-id="${proxyId}"]`);
+        const nextState = toggle.checked;
+        const previousState = !nextState;
+
+        toggle.disabled = true;
+        if (info) info.textContent = 'Сохраняем...';
+
+        try {
+          const response = await fetch(`${adminBase}/proxies/${proxyId}/active`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ is_active: nextState }),
+          });
+          const payload = await response.json();
+          if (!response.ok || !payload.ok) {
+            throw new Error(payload.error || 'Не удалось обновить прокси');
+          }
+          if (info) info.textContent = 'Сохранено';
+        } catch (error) {
+          toggle.checked = previousState;
+          if (info) info.textContent = `Ошибка: ${error.message}`;
+        } finally {
+          toggle.disabled = false;
+        }
+      });
+    });
+  })();
+</script>
 
 <%- include('partials/footer') %>

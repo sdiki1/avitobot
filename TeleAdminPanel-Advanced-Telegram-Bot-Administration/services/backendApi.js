@@ -35,6 +35,8 @@ exports.updateProxy = (id, payload) => request(`/proxies/${id}`, { method: 'PUT'
 exports.deleteProxy = (id) => request(`/proxies/${id}`, { method: 'DELETE' });
 
 exports.getUsers = () => request('/users');
+exports.addAdminUser = (payload) => request('/users/admins', { method: 'POST', body: JSON.stringify(payload) });
+exports.updateUserAdmin = (id, payload) => request(`/users/${id}/admin`, { method: 'PUT', body: JSON.stringify(payload) });
 exports.getMonitorings = () => request('/monitorings');
 exports.updateMonitoring = (id, payload) => request(`/monitorings/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
 exports.getTrialSettings = () => request('/trial-settings');

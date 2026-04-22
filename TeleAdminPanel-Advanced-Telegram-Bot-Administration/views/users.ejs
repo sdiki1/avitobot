@@ -2,9 +2,24 @@
 
 <section class="card">
   <h1>Пользователи</h1>
+  <% if (success) { %>
+    <div class="alert info"><%= success %></div>
+  <% } %>
   <% if (error) { %>
     <div class="alert error"><%= error %></div>
   <% } %>
+
+  <h2>Добавить администратора</h2>
+  <form class="form-grid" action="<%= adminBase %>/users/admins" method="post">
+    <input name="telegram_id" type="number" placeholder="Telegram ID" required />
+    <input name="username" placeholder="username (опционально)" />
+    <input name="full_name" placeholder="Имя (опционально)" />
+    <button type="submit">Назначить админом</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Список пользователей</h2>
   <div class="table-wrap">
     <table class="table">
       <thead>
@@ -13,6 +28,7 @@
           <th>Telegram ID</th>
           <th>Имя</th>
           <th>Ссылок</th>
+          <th>Роль</th>
           <th>Зарегистрирован</th>
         </tr>
       </thead>
@@ -32,6 +48,18 @@
               <%= user.active_links %>
             </span>
           </td>
+          <td>
+            <label>
+              <input
+                type="checkbox"
+                class="js-admin-toggle"
+                data-user-id="<%= user.id %>"
+                <%= user.is_admin ? 'checked' : '' %>
+              />
+              Админ
+            </label>
+            <span class="muted js-admin-toggle-state" data-user-id="<%= user.id %>"></span>
+          </td>
           <td class="muted"><%= user.created_at %></td>
         </tr>
       <% }) %>
@@ -39,5 +67,42 @@
     </table>
   </div>
 </section>
+
+<script>
+  (function () {
+    const adminBase = <%- JSON.stringify(adminBase) %>;
+    const toggles = document.querySelectorAll('.js-admin-toggle');
+
+    toggles.forEach((toggle) => {
+      toggle.addEventListener('change', async () => {
+        const userId = toggle.dataset.userId;
+        const info = document.querySelector(`.js-admin-toggle-state[data-user-id="${userId}"]`);
+        const nextState = toggle.checked;
+        const previousState = !nextState;
+
+        toggle.disabled = true;
+        if (info) info.textContent = 'Сохраняем...';
+
+        try {
+          const response = await fetch(`${adminBase}/users/${userId}/admin`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ is_admin: nextState }),
+          });
+          const payload = await response.json();
+          if (!response.ok || !payload.ok) {
+            throw new Error(payload.error || 'Не удалось изменить роль');
+          }
+          if (info) info.textContent = 'Сохранено';
+        } catch (error) {
+          toggle.checked = previousState;
+          if (info) info.textContent = `Ошибка: ${error.message}`;
+        } finally {
+          toggle.disabled = false;
+        }
+      });
+    });
+  })();
+</script>
 
 <%- include('partials/footer') %>

@@ -141,6 +141,8 @@ def init_db() -> None:
         conn.exec_driver_sql("ALTER TABLE proxies ADD COLUMN IF NOT EXISTS cooldown_until TIMESTAMP WITH TIME ZONE")
         conn.exec_driver_sql("ALTER TABLE proxies ADD COLUMN IF NOT EXISTS last_blocked_at TIMESTAMP WITH TIME ZONE")
         conn.exec_driver_sql("ALTER TABLE proxies ADD COLUMN IF NOT EXISTS last_block_status INTEGER")
+        conn.exec_driver_sql("ALTER TABLE proxies ADD COLUMN IF NOT EXISTS expires_on DATE")
+        conn.exec_driver_sql("ALTER TABLE proxies ADD COLUMN IF NOT EXISTS expiry_notified_at TIMESTAMP WITH TIME ZONE")
 
 
 def seed_default_plans(db: Session) -> None:
