@@ -236,6 +236,7 @@ export default function App() {
   const [selectedPlanId, setSelectedPlanId] = useState(null)
   const [useReferralBalance, setUseReferralBalance] = useState(false)
   const [buyDraft, setBuyDraft] = useState({ title: '', url: '' })
+  const [buyTargetMonitoringId, setBuyTargetMonitoringId] = useState(null)
   const [allSubscriptionsExpanded, setAllSubscriptionsExpanded] = useState(true)
 
   useEffect(() => {
@@ -445,14 +446,18 @@ export default function App() {
     setSubscriptionView(SUBSCRIPTION_VIEW.detail)
   }
 
-  const openBuyScreen = () => {
-    if (selectedMonitoring) {
+  const openBuyScreen = ({ renew = false } = {}) => {
+    if (renew && selectedMonitoring) {
       ensureDraft(selectedMonitoring)
       const draft = drafts[selectedMonitoring.uid] || {
         title: selectedMonitoring.title || '',
         url: selectedMonitoring.url || '',
       }
       setBuyDraft({ title: draft.title || '', url: draft.url || '' })
+      setBuyTargetMonitoringId(Number(selectedMonitoring.id))
+    } else {
+      setBuyDraft({ title: '', url: '' })
+      setBuyTargetMonitoringId(null)
     }
     setSubscriptionView(SUBSCRIPTION_VIEW.buy)
   }
@@ -470,12 +475,12 @@ export default function App() {
     }
 
     if (subscriptionView === SUBSCRIPTION_VIEW.buy) {
-      setSubscriptionView(selectedMonitoringId ? SUBSCRIPTION_VIEW.detail : SUBSCRIPTION_VIEW.home)
+      setSubscriptionView(buyTargetMonitoringId ? SUBSCRIPTION_VIEW.detail : SUBSCRIPTION_VIEW.home)
       return
     }
 
     window.Telegram?.WebApp?.close?.()
-  }, [selectedMonitoringId, subscriptionView, tab])
+  }, [buyTargetMonitoringId, subscriptionView, tab])
 
   const onPurchase = async () => {
     if (!telegramId || !selectedPlan || purchaseBusy) return
@@ -486,8 +491,7 @@ export default function App() {
         plan_id: Number(selectedPlan.id),
         subscription_type: selectedType,
         use_referral_balance: useReferralBalance,
-        monitoring_id:
-          selectedMonitoring && !selectedMonitoring.virtual ? Number(selectedMonitoring.id) : null,
+        monitoring_id: buyTargetMonitoringId ? Number(buyTargetMonitoringId) : null,
         monitoring_title: buyDraft.title || null,
         monitoring_url: buyDraft.url || null,
       })
@@ -517,7 +521,7 @@ export default function App() {
       setStatusMessage(
         `Подписка активирована: ${selectedPlan.name}. Итог к оплате: ${result?.amount_rub ?? totalPrice} ₽`,
       )
-      setSubscriptionView(selectedMonitoring ? SUBSCRIPTION_VIEW.detail : SUBSCRIPTION_VIEW.home)
+      setSubscriptionView(buyTargetMonitoringId ? SUBSCRIPTION_VIEW.detail : SUBSCRIPTION_VIEW.home)
     } catch (error) {
       const detail = error?.response?.data?.detail || error?.message || 'Ошибка покупки подписки'
       setStatusMessage(`Ошибка: ${detail}`)
@@ -548,7 +552,7 @@ export default function App() {
         setPendingPaymentUrl('')
         await loadData(effectiveTelegramId)
         setStatusMessage(`Оплата подтверждена. Подписка активирована.`)
-        setSubscriptionView(selectedMonitoring ? SUBSCRIPTION_VIEW.detail : SUBSCRIPTION_VIEW.home)
+        setSubscriptionView(buyTargetMonitoringId ? SUBSCRIPTION_VIEW.detail : SUBSCRIPTION_VIEW.home)
         return
       }
 
@@ -740,7 +744,11 @@ export default function App() {
                 ))}
               </div>
 
-              <button type="button" className="primary-btn purchase-bottom-btn" onClick={openBuyScreen}>
+              <button
+                type="button"
+                className="primary-btn purchase-bottom-btn"
+                onClick={() => openBuyScreen({ renew: false })}
+              >
                 Купить подписку
               </button>
             </section>
@@ -777,7 +785,7 @@ export default function App() {
 
                   <p className="hint-text">Ссылка на объявления — это поисковая ссылка, которая выводит все объявления при поиске.</p>
 
-                  <button type="button" className="primary-btn" onClick={openBuyScreen}>
+                  <button type="button" className="primary-btn" onClick={() => openBuyScreen({ renew: true })}>
                     Продлить подписку →
                   </button>
 

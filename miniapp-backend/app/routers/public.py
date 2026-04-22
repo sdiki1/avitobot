@@ -395,7 +395,14 @@ def _finalize_subscription_payment(
     amount_to_pay = max(0, _safe_int(payment.amount_rub, 0))
     referral_used = max(0, _safe_int(payload.get("referral_used_rub"), 0))
     total_price = max(amount_to_pay + referral_used, _safe_int(payload.get("total_price_rub"), amount_to_pay + referral_used))
-    current_total_slots = db.scalar(select(func.count(Monitoring.id)).where(Monitoring.user_id == user.id)) or 0
+    current_total_slots = db.scalar(
+        select(func.count(Monitoring.id)).where(
+            and_(
+                Monitoring.user_id == user.id,
+                Monitoring.bot_id.is_not(None),
+            )
+        )
+    ) or 0
     target_total_slots = max(
         int(current_total_slots),
         _safe_int(payload.get("target_total_slots"), int(current_total_slots)),
