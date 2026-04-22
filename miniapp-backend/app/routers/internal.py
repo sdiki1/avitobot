@@ -123,6 +123,7 @@ def _stop_monitoring_due_subscription_expired(db: Session, monitoring: Monitorin
             int(user.telegram_id),
             text,
             reply_markup=build_subscription_cta_markup(db),
+            photo_key="monitoring_stop",
         )
     return True
 

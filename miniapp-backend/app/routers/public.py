@@ -831,15 +831,38 @@ def update_monitoring(
             f"Мониторинг: «{title}»\n"
             f"Новая ссылка:\n{monitoring.url}"
         )
-        send_monitoring_bot_message(db, monitoring, auth_user.telegram_id, message)
+        send_monitoring_bot_message(
+            db,
+            monitoring,
+            auth_user.telegram_id,
+            message,
+            photo_key="link_change",
+        )
+
+    if started_from_miniapp and monitoring.is_active:
+        title = (monitoring.title or f"Мониторинг #{monitoring.id}").strip()
+        message = f"▶️ Мониторинг «{title}» запущен через MiniApp."
+        send_monitoring_bot_message(
+            db,
+            monitoring,
+            auth_user.telegram_id,
+            message,
+            photo_key="monitoring_start",
+        )
 
     if was_active and not monitoring.is_active and payload.is_active is False:
         title = (monitoring.title or f"Мониторинг #{monitoring.id}").strip()
         message = (
             f"⏹ Мониторинг «{title}» остановлен через MiniApp.\n"
-            "Для возобновления используйте команду /start_monitoring."
+            "Для возобновления используйте команду /start_monitoring"
         )
-        send_monitoring_bot_message(db, monitoring, auth_user.telegram_id, message)
+        send_monitoring_bot_message(
+            db,
+            monitoring,
+            auth_user.telegram_id,
+            message,
+            photo_key="monitoring_stop",
+        )
 
     return _monitoring_to_schema(monitoring)
 

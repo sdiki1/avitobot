@@ -4,10 +4,13 @@ import hmac
 import html
 import json
 import logging
+import mimetypes
 import re
+from pathlib import Path
 from typing import Any
 from urllib import request as urllib_request
 from urllib.parse import quote, urlsplit, urlunsplit
+from uuid import uuid4
 
 from sqlalchemy import Select, and_, func, select
 from sqlalchemy.orm import Session
@@ -18,6 +21,8 @@ from app.models import AppSetting, Monitoring, ProxyConfig, TariffPlan, Telegram
 logger = logging.getLogger(__name__)
 TRIAL_DAYS_SETTING_KEY = "trial_days"
 DEFAULT_TRIAL_DAYS = 3
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 MINIAPP_CONTENT_DEFAULTS = {
     "miniapp_info_support_title": "Поддержка",
@@ -34,6 +39,27 @@ MINIAPP_CONTENT_DEFAULTS = {
     "miniapp_subscriptions_hint": "Управление тарифом и переход к назначенным ботам.",
     "miniapp_profile_title": "Профиль",
 }
+STATIC_MESSAGE_PHOTOS: dict[str, list[Path]] = {
+    "error": [
+        BACKEND_ROOT / "msg_error.jpeg",
+        PROJECT_ROOT / "msg_error.jpeg",
+    ],
+    "link_change": [
+        BACKEND_ROOT / "msg_link_change.jpeg",
+        PROJECT_ROOT / "msg_link_change.jpeg",
+    ],
+    "monitoring_start": [
+        BACKEND_ROOT / "msg_monitoring_start.jpeg",
+        PROJECT_ROOT / "msg_monitoring_start.jpeg",
+    ],
+    "monitoring_stop": [
+        BACKEND_ROOT / "msg_monitoring_stop.jpeg",
+        BACKEND_ROOT / "msg_monitoring_stop.png",
+        PROJECT_ROOT / "msg_monitoring_stop.jpeg",
+        PROJECT_ROOT / "msg_monitoring_stop.png",
+    ],
+}
+_logged_missing_static_photo_keys: set[str] = set()
 
 
 def now_utc() -> datetime:
@@ -414,6 +440,76 @@ def _send_telegram_message(
         return False
 
 
+def _resolve_static_photo_path(photo_key: str | None) -> Path | None:
+    if not photo_key:
+        return None
+    candidates = STATIC_MESSAGE_PHOTOS.get(photo_key) or []
+    for candidate in candidates:
+        try:
+            if candidate.exists() and candidate.is_file():
+                return candidate
+        except OSError:
+            continue
+    if photo_key not in _logged_missing_static_photo_keys:
+        _logged_missing_static_photo_keys.add(photo_key)
+        joined = ", ".join(str(path) for path in candidates) or "<none>"
+        logger.warning("Static photo for key='%s' not found. Tried: %s", photo_key, joined)
+    return None
+
+
+def _send_telegram_photo(
+    bot_token: str,
+    chat_id: int,
+    caption: str,
+    photo_path: Path,
+    *,
+    reply_markup: dict[str, Any] | None = None,
+) -> bool:
+    try:
+        photo_bytes = photo_path.read_bytes()
+    except OSError as exc:
+        logger.warning("Failed to read static photo path='%s': %s", photo_path, exc)
+        return False
+
+    boundary = f"----AvitoBotBoundary{uuid4().hex}"
+    mime_type = mimetypes.guess_type(photo_path.name)[0] or "application/octet-stream"
+    body_parts: list[bytes] = []
+
+    def _append_field(name: str, value: str) -> None:
+        body_parts.append(f"--{boundary}\r\n".encode("utf-8"))
+        body_parts.append(f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("utf-8"))
+        body_parts.append(value.encode("utf-8"))
+        body_parts.append(b"\r\n")
+
+    _append_field("chat_id", str(chat_id))
+    _append_field("caption", caption)
+    if reply_markup:
+        _append_field("reply_markup", json.dumps(reply_markup, ensure_ascii=False))
+
+    body_parts.append(f"--{boundary}\r\n".encode("utf-8"))
+    body_parts.append(
+        f'Content-Disposition: form-data; name="photo"; filename="{photo_path.name}"\r\n'.encode("utf-8")
+    )
+    body_parts.append(f"Content-Type: {mime_type}\r\n\r\n".encode("utf-8"))
+    body_parts.append(photo_bytes)
+    body_parts.append(b"\r\n")
+    body_parts.append(f"--{boundary}--\r\n".encode("utf-8"))
+    body = b"".join(body_parts)
+
+    req = urllib_request.Request(
+        f"https://api.telegram.org/bot{bot_token}/sendPhoto",
+        data=body,
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+        method="POST",
+    )
+    try:
+        with urllib_request.urlopen(req, timeout=15) as response:
+            return 200 <= response.status < 300
+    except Exception as exc:
+        logger.warning("Failed to send telegram photo path='%s': %s", photo_path, exc)
+        return False
+
+
 def get_admin_notify_chat_ids(db: Session) -> list[int]:
     chat_ids: set[int] = set()
 
@@ -595,6 +691,7 @@ def send_monitoring_bot_message(
     text: str,
     *,
     reply_markup: dict[str, Any] | None = None,
+    photo_key: str | None = None,
 ) -> bool:
     if not monitoring.bot_id or not text or not text.strip():
         return False
@@ -604,6 +701,16 @@ def send_monitoring_bot_message(
         bot = db.get(TelegramBot, monitoring.bot_id)
     if not bot or not bot.bot_token:
         return False
+
+    photo_path = _resolve_static_photo_path(photo_key)
+    if photo_path and _send_telegram_photo(
+        bot.bot_token,
+        telegram_id,
+        text,
+        photo_path,
+        reply_markup=reply_markup,
+    ):
+        return True
 
     return _send_telegram_message(
         bot.bot_token,
