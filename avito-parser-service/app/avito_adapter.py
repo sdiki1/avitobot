@@ -209,6 +209,7 @@ class AvitoAdapter:
             (proxy, "env") for proxy in env_candidates
         ]
         last_exc: Exception | None = None
+        monitoring_id = monitoring.get("monitoring_id")
 
         for idx, (proxy, source) in enumerate(candidates, start=1):
             proxy_label = f"{idx}/{len(candidates)} source={source}"
@@ -218,8 +219,15 @@ class AvitoAdapter:
             try:
                 response = requests.get(url, headers=HEADERS, timeout=max(10, REQUEST_TIMEOUT_SEC), proxies=proxies)
                 response.raise_for_status()
-                if idx > 1:
-                    logger.info(f"Recovered with fallback proxy {proxy_label} for url={url}")
+                logger.info(
+                    "Request proxy used: monitoring_id={} url={} proxy={} source={} attempt={}/{}",
+                    monitoring_id,
+                    url,
+                    proxy,
+                    source,
+                    idx,
+                    len(candidates),
+                )
                 return response
             except requests.exceptions.HTTPError as exc:
                 status_code = exc.response.status_code if exc.response is not None else None
