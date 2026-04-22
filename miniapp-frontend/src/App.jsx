@@ -249,23 +249,8 @@ export default function App() {
       return monitorings.map((item) => ({ ...item, uid: String(item.id) }))
     }
 
-    if (profile?.subscription) {
-      return [
-        {
-          uid: 'virtual-subscription',
-          id: 'virtual-subscription',
-          title: profile.subscription?.is_trial ? 'Тестовая подписка' : 'Подписка',
-          url: '',
-          bot: null,
-          is_active: false,
-          link_configured: false,
-          virtual: true,
-        },
-      ]
-    }
-
     return []
-  }, [monitorings, profile])
+  }, [monitorings])
 
   const selectedMonitoring = useMemo(
     () => normalizedMonitorings.find((item) => item.uid === selectedMonitoringId) || null,

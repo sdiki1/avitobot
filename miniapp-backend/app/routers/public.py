@@ -532,7 +532,14 @@ def profile(
         select(func.count(Monitoring.id)).where(and_(Monitoring.user_id == user.id, Monitoring.is_active.is_(True)))
     )
     user_monitorings = db.scalars(
-        select(Monitoring).where(Monitoring.user_id == user.id).order_by(Monitoring.id.asc())
+        select(Monitoring)
+        .where(
+            and_(
+                Monitoring.user_id == user.id,
+                Monitoring.is_active.is_(True),
+            )
+        )
+        .order_by(Monitoring.id.asc())
     ).all()
     referral_bot = db.scalar(
         select(TelegramBot)
@@ -618,7 +625,20 @@ def list_monitorings(
 ) -> list[MonitoringResponse]:
     assert_telegram_id_match(auth_user, telegram_id)
     user = auth_user
-    monitorings = db.scalars(select(Monitoring).where(Monitoring.user_id == user.id).order_by(Monitoring.id.desc())).all()
+    active_sub = db.scalar(get_active_subscription_query(user.id))
+    if not active_sub:
+        return []
+
+    monitorings = db.scalars(
+        select(Monitoring)
+        .where(
+            and_(
+                Monitoring.user_id == user.id,
+                Monitoring.is_active.is_(True),
+            )
+        )
+        .order_by(Monitoring.id.desc())
+    ).all()
     return [_monitoring_to_schema(m) for m in monitorings]
 
 
@@ -700,6 +720,8 @@ def update_monitoring(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Сначала задайте ссылку, затем включайте мониторинг",
             )
+        if payload.is_active:
+            _require_active_subscription(db, auth_user.id)
         monitoring.is_active = payload.is_active
 
     if payload.include_photo is not None:
