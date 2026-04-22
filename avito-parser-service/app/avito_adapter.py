@@ -23,7 +23,14 @@ from common_data import HEADERS  # type: ignore  # noqa: E402
 from dto import AvitoConfig  # type: ignore  # noqa: E402
 from filters.ads_filter import AdsFilter  # type: ignore  # noqa: E402
 from models import ItemsResponse, Item  # type: ignore  # noqa: E402
-from app.config import BACKEND_URL, INTERNAL_API_TOKEN, PARSER_PROXY_LIST, PROXY_BLOCK_COOLDOWN_SECONDS, REQUEST_TIMEOUT_SEC
+from app.config import (
+    BACKEND_URL,
+    DB_PROXY_BLOCK_COOLDOWN_SECONDS,
+    ENV_PROXY_BLOCK_COOLDOWN_SECONDS,
+    INTERNAL_API_TOKEN,
+    PARSER_PROXY_LIST,
+    REQUEST_TIMEOUT_SEC,
+)
 
 
 class AvitoAdapter:
@@ -139,8 +146,8 @@ class AvitoAdapter:
             return False
         return True
 
-    def _set_local_proxy_cooldown(self, proxy_url: str) -> None:
-        cooldown_seconds = max(1, int(PROXY_BLOCK_COOLDOWN_SECONDS))
+    def _set_local_proxy_cooldown(self, proxy_url: str, source: str) -> None:
+        cooldown_seconds = ENV_PROXY_BLOCK_COOLDOWN_SECONDS if source == "env" else DB_PROXY_BLOCK_COOLDOWN_SECONDS
         self._proxy_cooldown_until[proxy_url] = datetime.now(timezone.utc) + timedelta(seconds=cooldown_seconds)
 
     def _report_blocked_proxy(self, proxy_url: str, status_code: int, source_url: str) -> None:
@@ -233,7 +240,7 @@ class AvitoAdapter:
                 status_code = exc.response.status_code if exc.response is not None else None
                 last_exc = exc
                 if status_code in {403, 407, 429} or (status_code is not None and status_code >= 500):
-                    self._set_local_proxy_cooldown(proxy)
+                    self._set_local_proxy_cooldown(proxy, source)
                     if source == "db":
                         self._report_blocked_proxy(proxy, int(status_code or 0), url)
                     logger.warning(
@@ -243,7 +250,7 @@ class AvitoAdapter:
                 raise
             except (requests.exceptions.ProxyError, requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
                 last_exc = exc
-                self._set_local_proxy_cooldown(proxy)
+                self._set_local_proxy_cooldown(proxy, source)
                 if source == "db":
                     self._report_blocked_proxy(proxy, 0, url)
                 logger.warning(f"Proxy {proxy_label} failed for url={url}: {exc}. Switching to next proxy.")
@@ -251,7 +258,7 @@ class AvitoAdapter:
             except requests.exceptions.InvalidSchema as exc:
                 last_exc = exc
                 if "SOCKS support" in str(exc):
-                    self._set_local_proxy_cooldown(proxy)
+                    self._set_local_proxy_cooldown(proxy, source)
                     if source == "db":
                         self._report_blocked_proxy(proxy, 0, url)
                     logger.warning(f"Proxy {proxy_label} has unsupported SOCKS schema: {exc}. Switching to next proxy.")

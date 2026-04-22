@@ -441,12 +441,28 @@ def delete_plan(plan_id: int, db: Session = Depends(get_db)) -> dict:
 
 @router.get("/proxies", response_model=list[ProxyResponse])
 def list_proxies(db: Session = Depends(get_db)) -> list[ProxyConfig]:
-    return list(db.scalars(select(ProxyConfig).order_by(ProxyConfig.id.asc())))
+    return list(
+        db.scalars(
+            select(ProxyConfig)
+            .where(ProxyConfig.name.notlike("env-proxy-%"))
+            .order_by(ProxyConfig.id.asc())
+        )
+    )
 
 
 @router.post("/proxies", response_model=ProxyResponse)
 def create_proxy(payload: ProxyCreate, db: Session = Depends(get_db)) -> ProxyConfig:
-    proxy = ProxyConfig(**payload.model_dump())
+    normalized_name = (payload.name or "").strip()
+    if normalized_name.startswith("env-proxy-"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Reserved proxy name prefix")
+
+    proxy = ProxyConfig(
+        name=normalized_name,
+        proxy_url=payload.proxy_url,
+        change_ip_url=payload.change_ip_url,
+        is_active=payload.is_active,
+        expires_on=payload.expires_on,
+    )
     db.add(proxy)
     db.commit()
     db.refresh(proxy)
@@ -458,8 +474,15 @@ def update_proxy(proxy_id: int, payload: ProxyUpdate, db: Session = Depends(get_
     proxy = db.get(ProxyConfig, proxy_id)
     if not proxy:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Proxy not found")
+    if (proxy.name or "").startswith("env-proxy-"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Proxy not found")
 
     payload_data = payload.model_dump(exclude_unset=True)
+    if "name" in payload_data:
+        next_name = (payload_data.get("name") or "").strip()
+        if next_name.startswith("env-proxy-"):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Reserved proxy name prefix")
+        payload_data["name"] = next_name
     old_expires_on = proxy.expires_on
     for key, value in payload_data.items():
         setattr(proxy, key, value)
@@ -474,6 +497,8 @@ def update_proxy(proxy_id: int, payload: ProxyUpdate, db: Session = Depends(get_
 def delete_proxy(proxy_id: int, db: Session = Depends(get_db)) -> dict:
     proxy = db.get(ProxyConfig, proxy_id)
     if not proxy:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Proxy not found")
+    if (proxy.name or "").startswith("env-proxy-"):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Proxy not found")
     db.delete(proxy)
     db.commit()
