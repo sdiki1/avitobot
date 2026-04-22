@@ -1,7 +1,11 @@
+from datetime import datetime
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import and_, desc, func, select, update
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.database import get_db
 from app.models import Monitoring, MonitoringItem, Notification, Payment, TariffPlan, TelegramBot, User, UserSubscription
 from app.schemas import (
@@ -41,6 +45,7 @@ from app.services.helpers import (
     send_subscription_assigned_bot_message,
 )
 from app.services.notification_queue import purge_monitoring_notifications
+from app.services.yookassa import YooKassaError, create_sbp_payment, get_payment as get_yookassa_payment, yookassa_is_configured
 from app.services.miniapp_auth import (
     assert_telegram_id_match,
     clear_miniapp_session,
@@ -51,6 +56,7 @@ from app.services.miniapp_auth import (
 )
 
 router = APIRouter(prefix="/public", tags=["public"])
+webhook_router = APIRouter(tags=["webhooks"])
 ONBOARDING_TRIAL_DAYS = 1
 
 
@@ -212,6 +218,187 @@ def _activate_onboarding_trial(db: Session, user: User) -> UserSubscription | No
             "🧪 Активирован пробный период\n"
             f"Пользователь: {user.telegram_id}\n"
             f"Срок: {ONBOARDING_TRIAL_DAYS} дн."
+        ),
+    )
+    return subscription
+
+
+def _safe_int(value: object, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _append_query_param(url: str, key: str, value: str) -> str:
+    raw = (url or "").strip()
+    if not raw:
+        return raw
+    parsed = urlsplit(raw)
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    query[key] = value
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(query), parsed.fragment))
+
+
+def _parse_iso_datetime(value: object) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    if not isinstance(value, str):
+        return None
+    raw = value.strip()
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _payment_payload(payment: Payment) -> dict:
+    payload = payment.payload if isinstance(payment.payload, dict) else {}
+    return dict(payload)
+
+
+def _refund_referral_if_needed(user: User, payload: dict) -> dict:
+    referral_used = max(0, _safe_int(payload.get("referral_used_rub"), 0))
+    if referral_used <= 0:
+        return payload
+    if bool(payload.get("referral_refunded")):
+        return payload
+    user.referral_balance_rub = max(0, int(user.referral_balance_rub or 0)) + referral_used
+    payload["referral_refunded"] = True
+    return payload
+
+
+def _build_purchase_response(
+    *,
+    ok: bool,
+    user_id: int,
+    plan_id: int,
+    amount_rub: int,
+    referral_used_rub: int,
+    total_price_rub: int,
+    subscription: UserSubscription | None = None,
+    payment: Payment | None = None,
+    requires_payment: bool = False,
+    payment_status: str | None = None,
+    payment_url: str | None = None,
+    message: str | None = None,
+) -> PurchaseSubscriptionResponse:
+    payload = _payment_payload(payment) if payment else {}
+    sub_id = subscription.id if subscription else (_safe_int(payload.get("subscription_id"), 0) or None)
+    ends_at = subscription.ends_at if subscription else _parse_iso_datetime(payload.get("ends_at"))
+    status_value = payment_status or str(payload.get("yookassa_status") or (payment.status if payment else "") or "").strip() or None
+    confirmation_url = payment_url or (str(payload.get("confirmation_url") or "").strip() or None)
+    return PurchaseSubscriptionResponse(
+        ok=ok,
+        requires_payment=requires_payment,
+        payment_id=payment.id if payment else None,
+        payment_status=status_value,
+        payment_url=confirmation_url,
+        subscription_id=sub_id,
+        user_id=user_id,
+        plan_id=plan_id,
+        ends_at=ends_at,
+        is_trial=False,
+        amount_rub=max(0, int(amount_rub)),
+        referral_used_rub=max(0, int(referral_used_rub)),
+        total_price_rub=max(0, int(total_price_rub)),
+        message=message,
+    )
+
+
+def _apply_monitoring_purchase_payload(db: Session, user: User, payload: dict, target_total_slots: int) -> None:
+    ensure_subscription_monitoring_slots(db, user.id, target_total_slots)
+
+    monitoring_id = _safe_int(payload.get("monitoring_id"), 0)
+    target_monitoring = None
+    if monitoring_id > 0:
+        target_monitoring = db.scalar(
+            select(Monitoring).where(and_(Monitoring.id == monitoring_id, Monitoring.user_id == user.id))
+        )
+
+    configured_monitoring = target_monitoring
+    if not configured_monitoring:
+        configured_monitoring = db.scalar(
+            select(Monitoring)
+            .where(
+                and_(
+                    Monitoring.user_id == user.id,
+                    Monitoring.link_configured.is_(False),
+                )
+            )
+            .order_by(Monitoring.id.desc())
+        )
+    if not configured_monitoring:
+        return
+
+    monitoring_title = str(payload.get("monitoring_title") or "").strip()
+    if monitoring_title:
+        configured_monitoring.title = monitoring_title
+
+    monitoring_url_raw = payload.get("monitoring_url")
+    if monitoring_url_raw is not None:
+        cleaned_url = normalize_monitoring_url(str(monitoring_url_raw))
+        if cleaned_url:
+            configured_monitoring.url = cleaned_url
+            configured_monitoring.link_configured = True
+
+
+def _finalize_subscription_payment(
+    *,
+    db: Session,
+    user: User,
+    plan: TariffPlan,
+    payment: Payment,
+) -> UserSubscription:
+    payload = _payment_payload(payment)
+    existing_subscription_id = _safe_int(payload.get("subscription_id"), 0)
+    if bool(payload.get("finalized")) and existing_subscription_id > 0:
+        existing = db.get(UserSubscription, existing_subscription_id)
+        if existing:
+            return existing
+
+    amount_to_pay = max(0, _safe_int(payment.amount_rub, 0))
+    referral_used = max(0, _safe_int(payload.get("referral_used_rub"), 0))
+    total_price = max(amount_to_pay + referral_used, _safe_int(payload.get("total_price_rub"), amount_to_pay + referral_used))
+    current_total_slots = db.scalar(select(func.count(Monitoring.id)).where(Monitoring.user_id == user.id)) or 0
+    target_total_slots = max(
+        int(current_total_slots),
+        _safe_int(payload.get("target_total_slots"), int(current_total_slots)),
+    )
+
+    subscription = activate_user_subscription(
+        db,
+        user.id,
+        plan,
+        amount_paid_override=amount_to_pay,
+        is_trial=False,
+    )
+    _apply_monitoring_purchase_payload(db, user, payload, target_total_slots)
+
+    reward = reward_referrer_for_payment(db, user, amount_to_pay)
+    payment.status = "completed"
+    payload["finalized"] = True
+    payload["subscription_id"] = subscription.id
+    payload["ends_at"] = subscription.ends_at.isoformat()
+    payload["reward_rub"] = reward
+    payload["paid_amount_rub"] = amount_to_pay
+    payload["referral_used_rub"] = referral_used
+    payload["total_price_rub"] = total_price
+    payment.payload = payload
+    db.commit()
+
+    send_subscription_assigned_bot_message(db, user)
+    send_admin_event_message(
+        db,
+        (
+            "💳 Покупка подписки\n"
+            f"Пользователь: {user.telegram_id}\n"
+            f"Тариф: {plan.name}\n"
+            f"Сумма: {amount_to_pay} ₽\n"
+            f"Списано с реф. баланса: {referral_used} ₽\n"
+            f"Начислено рефереру: {reward} ₽"
         ),
     )
     return subscription
@@ -637,84 +824,391 @@ def purchase_subscription(
         user.referral_balance_rub = current_balance - referral_used
 
     amount_to_pay = max(0, total_price - referral_used)
-    plan_name_normalized = (plan.name or "").strip().lower()
-    provider = "miniapp_speed" if plan_name_normalized.startswith("скорост") else "miniapp_standard"
-    if referral_used > 0:
-        provider = f"{provider}_with_ref"
+    purchase_payload = {
+        "subscription_type": "speed" if (payload.subscription_type or "").strip().lower().startswith("speed") else "standard",
+        "duration_days": int(plan.duration_days),
+        "monitoring_id": target_monitoring.id if target_monitoring else None,
+        "base_price_rub": base_price,
+        "speed_surcharge_rub": 0,
+        "total_price_rub": total_price,
+        "referral_used_rub": referral_used,
+        "referral_debited": referral_used > 0,
+        "referral_refunded": False,
+        "target_total_slots": target_total_slots,
+        "monitoring_title": payload.monitoring_title,
+        "monitoring_url": payload.monitoring_url,
+        "finalized": False,
+    }
 
+    if amount_to_pay <= 0:
+        plan_name_normalized = (plan.name or "").strip().lower()
+        provider = "miniapp_speed" if plan_name_normalized.startswith("скорост") else "miniapp_standard"
+        if referral_used > 0:
+            provider = f"{provider}_with_ref"
+
+        payment = Payment(
+            user_id=user.id,
+            plan_id=plan.id,
+            amount_rub=amount_to_pay,
+            status="completed",
+            provider=provider,
+            payload=purchase_payload,
+        )
+        db.add(payment)
+        db.flush()
+        subscription = _finalize_subscription_payment(
+            db=db,
+            user=user,
+            plan=plan,
+            payment=payment,
+        )
+        return _build_purchase_response(
+            ok=True,
+            user_id=user.id,
+            plan_id=plan.id,
+            amount_rub=amount_to_pay,
+            referral_used_rub=referral_used,
+            total_price_rub=total_price,
+            subscription=subscription,
+            payment=payment,
+            requires_payment=False,
+            payment_status="succeeded",
+            message="Подписка активирована",
+        )
+
+    if not yookassa_is_configured():
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="ЮKassa не настроена")
+
+    provider = "yookassa_sbp_with_ref" if referral_used > 0 else "yookassa_sbp"
     payment = Payment(
         user_id=user.id,
         plan_id=plan.id,
         amount_rub=amount_to_pay,
-        status="completed",
+        status="pending",
         provider=provider,
-        payload={
-            "subscription_type": "speed" if provider.startswith("miniapp_speed") else "standard",
-            "duration_days": int(plan.duration_days),
-            "monitoring_id": target_monitoring.id if target_monitoring else None,
-            "base_price_rub": base_price,
-            "speed_surcharge_rub": 0,
-            "total_price_rub": total_price,
-            "referral_used_rub": referral_used,
-            "monitoring_title": payload.monitoring_title,
-            "monitoring_url": payload.monitoring_url,
-        },
+        payload=purchase_payload,
     )
     db.add(payment)
-    subscription = activate_user_subscription(
-        db,
-        user.id,
-        plan,
-        amount_paid_override=amount_to_pay,
-        is_trial=False,
-    )
-    ensure_subscription_monitoring_slots(db, user.id, target_total_slots)
-    configured_monitoring = target_monitoring
-    if not configured_monitoring:
-        configured_monitoring = db.scalar(
-            select(Monitoring)
-            .where(
-                and_(
-                    Monitoring.user_id == user.id,
-                    Monitoring.link_configured.is_(False),
-                )
-            )
-            .order_by(Monitoring.id.desc())
-        )
-    if configured_monitoring:
-        if payload.monitoring_title and payload.monitoring_title.strip():
-            configured_monitoring.title = payload.monitoring_title.strip()
-        if payload.monitoring_url is not None:
-            cleaned_url = normalize_monitoring_url(payload.monitoring_url)
-            if cleaned_url:
-                configured_monitoring.url = cleaned_url
-                configured_monitoring.link_configured = True
+    db.flush()
 
-    reward = reward_referrer_for_payment(db, user, amount_to_pay)
-    db.commit()
-    send_subscription_assigned_bot_message(db, user)
-    send_admin_event_message(
-        db,
-        (
-            "💳 Покупка подписки\n"
-            f"Пользователь: {user.telegram_id}\n"
-            f"Тариф: {plan.name}\n"
-            f"Сумма: {amount_to_pay} ₽\n"
-            f"Списано с реф. баланса: {referral_used} ₽\n"
-            f"Начислено рефереру: {reward} ₽"
-        ),
+    return_url = _append_query_param(settings.yookassa_return_url_effective, "payment_id", str(payment.id))
+    try:
+        yookassa_payment = create_sbp_payment(
+            amount_rub=amount_to_pay,
+            description=f"Подписка «{plan.name}» для {user.telegram_id}",
+            return_url=return_url,
+            metadata={
+                "internal_payment_id": str(payment.id),
+                "telegram_id": str(user.telegram_id),
+                "plan_id": str(plan.id),
+            },
+            idempotence_key=f"miniapp-{payment.id}-{now_utc().timestamp()}",
+        )
+    except YooKassaError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Не удалось создать платеж ЮKassa: {exc}",
+        ) from exc
+
+    yookassa_status = str(yookassa_payment.get("status") or "pending").strip() or "pending"
+    confirmation = yookassa_payment.get("confirmation")
+    confirmation_url = (
+        str(confirmation.get("confirmation_url") or "").strip()
+        if isinstance(confirmation, dict)
+        else ""
     )
-    return PurchaseSubscriptionResponse(
+    payment.external_id = str(yookassa_payment.get("id") or "").strip() or None
+    payment_payload = _payment_payload(payment)
+    payment_payload["yookassa_status"] = yookassa_status
+    payment_payload["return_url"] = return_url
+    payment_payload["confirmation_url"] = confirmation_url or None
+    payment.payload = payment_payload
+
+    if yookassa_status == "canceled":
+        payment.status = "canceled"
+        payment_payload = _refund_referral_if_needed(user, payment_payload)
+        payment.payload = payment_payload
+        db.commit()
+        return _build_purchase_response(
+            ok=False,
+            user_id=user.id,
+            plan_id=plan.id,
+            amount_rub=amount_to_pay,
+            referral_used_rub=referral_used,
+            total_price_rub=total_price,
+            payment=payment,
+            requires_payment=False,
+            payment_status="canceled",
+            payment_url=confirmation_url or None,
+            message="Платеж отменен",
+        )
+
+    if yookassa_status == "succeeded":
+        payment.status = "completed"
+        subscription = _finalize_subscription_payment(
+            db=db,
+            user=user,
+            plan=plan,
+            payment=payment,
+        )
+        return _build_purchase_response(
+            ok=True,
+            user_id=user.id,
+            plan_id=plan.id,
+            amount_rub=amount_to_pay,
+            referral_used_rub=referral_used,
+            total_price_rub=total_price,
+            subscription=subscription,
+            payment=payment,
+            requires_payment=False,
+            payment_status="succeeded",
+            payment_url=confirmation_url or None,
+            message="Оплата подтверждена, подписка активирована",
+        )
+
+    payment.status = "pending"
+    db.commit()
+    return _build_purchase_response(
         ok=True,
-        subscription_id=subscription.id,
         user_id=user.id,
         plan_id=plan.id,
-        ends_at=subscription.ends_at,
-        is_trial=False,
         amount_rub=amount_to_pay,
         referral_used_rub=referral_used,
         total_price_rub=total_price,
+        payment=payment,
+        requires_payment=True,
+        payment_status=yookassa_status,
+        payment_url=confirmation_url or None,
+        message="Платеж создан. Завершите оплату и вернитесь в MiniApp.",
     )
+
+
+@router.get("/subscriptions/purchase/{payment_id}/status", response_model=PurchaseSubscriptionResponse)
+def subscription_purchase_status(
+    payment_id: int,
+    telegram_id: int = Query(...),
+    auth_user: User = Depends(require_miniapp_user),
+    db: Session = Depends(get_db),
+) -> PurchaseSubscriptionResponse:
+    assert_telegram_id_match(auth_user, telegram_id)
+    user = auth_user
+    payment = db.scalar(select(Payment).where(and_(Payment.id == payment_id, Payment.user_id == user.id)))
+    if not payment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Платеж не найден")
+
+    plan_id = int(payment.plan_id or 0)
+    if plan_id <= 0:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="В платеже не указан тариф")
+    plan = db.get(TariffPlan, plan_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Тариф платежа не найден")
+
+    payment_payload = _payment_payload(payment)
+    amount_to_pay = max(0, _safe_int(payment.amount_rub, 0))
+    referral_used = max(0, _safe_int(payment_payload.get("referral_used_rub"), 0))
+    total_price = max(amount_to_pay + referral_used, _safe_int(payment_payload.get("total_price_rub"), amount_to_pay + referral_used))
+
+    if payment.provider.startswith("yookassa") and payment.status not in {"completed", "canceled"} and payment.external_id:
+        if not yookassa_is_configured():
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="ЮKassa не настроена")
+        try:
+            yookassa_payment = get_yookassa_payment(payment.external_id)
+        except YooKassaError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Не удалось проверить платеж ЮKassa: {exc}",
+            ) from exc
+
+        yookassa_status = str(yookassa_payment.get("status") or "pending").strip() or "pending"
+        confirmation = yookassa_payment.get("confirmation")
+        confirmation_url = (
+            str(confirmation.get("confirmation_url") or "").strip()
+            if isinstance(confirmation, dict)
+            else ""
+        )
+        payment_payload["yookassa_status"] = yookassa_status
+        if confirmation_url:
+            payment_payload["confirmation_url"] = confirmation_url
+        payment.payload = payment_payload
+
+        if yookassa_status == "succeeded":
+            payment.status = "completed"
+            subscription = _finalize_subscription_payment(
+                db=db,
+                user=user,
+                plan=plan,
+                payment=payment,
+            )
+            return _build_purchase_response(
+                ok=True,
+                user_id=user.id,
+                plan_id=plan.id,
+                amount_rub=amount_to_pay,
+                referral_used_rub=referral_used,
+                total_price_rub=total_price,
+                subscription=subscription,
+                payment=payment,
+                requires_payment=False,
+                payment_status="succeeded",
+                payment_url=confirmation_url or None,
+                message="Оплата подтверждена, подписка активирована",
+            )
+
+        if yookassa_status == "canceled":
+            payment.status = "canceled"
+            payment_payload = _refund_referral_if_needed(user, payment_payload)
+            payment.payload = payment_payload
+            db.commit()
+            return _build_purchase_response(
+                ok=False,
+                user_id=user.id,
+                plan_id=plan.id,
+                amount_rub=amount_to_pay,
+                referral_used_rub=referral_used,
+                total_price_rub=total_price,
+                payment=payment,
+                requires_payment=False,
+                payment_status="canceled",
+                payment_url=confirmation_url or None,
+                message="Платеж отменен",
+            )
+
+        payment.status = "pending"
+        db.commit()
+        return _build_purchase_response(
+            ok=True,
+            user_id=user.id,
+            plan_id=plan.id,
+            amount_rub=amount_to_pay,
+            referral_used_rub=referral_used,
+            total_price_rub=total_price,
+            payment=payment,
+            requires_payment=True,
+            payment_status=yookassa_status,
+            payment_url=confirmation_url or None,
+            message="Платеж ожидает завершения",
+        )
+
+    if payment.status == "completed":
+        subscription = None
+        existing_subscription_id = _safe_int(payment_payload.get("subscription_id"), 0)
+        if existing_subscription_id > 0:
+            subscription = db.get(UserSubscription, existing_subscription_id)
+        if payment.provider.startswith("yookassa") and not subscription:
+            subscription = _finalize_subscription_payment(
+                db=db,
+                user=user,
+                plan=plan,
+                payment=payment,
+            )
+        return _build_purchase_response(
+            ok=True,
+            user_id=user.id,
+            plan_id=plan.id,
+            amount_rub=amount_to_pay,
+            referral_used_rub=referral_used,
+            total_price_rub=total_price,
+            subscription=subscription,
+            payment=payment,
+            requires_payment=False,
+            payment_status=str(payment_payload.get("yookassa_status") or payment.status or "").strip() or "succeeded",
+            message="Подписка активна",
+        )
+
+    if payment.status == "canceled":
+        payment_payload = _refund_referral_if_needed(user, payment_payload)
+        payment.payload = payment_payload
+        db.commit()
+        return _build_purchase_response(
+            ok=False,
+            user_id=user.id,
+            plan_id=plan.id,
+            amount_rub=amount_to_pay,
+            referral_used_rub=referral_used,
+            total_price_rub=total_price,
+            payment=payment,
+            requires_payment=False,
+            payment_status="canceled",
+            message="Платеж отменен",
+        )
+
+    return _build_purchase_response(
+        ok=True,
+        user_id=user.id,
+        plan_id=plan.id,
+        amount_rub=amount_to_pay,
+        referral_used_rub=referral_used,
+        total_price_rub=total_price,
+        payment=payment,
+        requires_payment=True,
+        payment_status=str(payment_payload.get("yookassa_status") or payment.status or "").strip() or "pending",
+        message="Платеж ожидает завершения",
+    )
+
+
+@webhook_router.post("/webhooks")
+def yookassa_webhook(payload: dict, db: Session = Depends(get_db)) -> dict:
+    event = str(payload.get("event") or "").strip().lower()
+    obj = payload.get("object")
+    if not isinstance(obj, dict):
+        return {"ok": True, "ignored": "invalid_payload"}
+
+    external_id = str(obj.get("id") or "").strip()
+    if not external_id:
+        return {"ok": True, "ignored": "missing_payment_id"}
+
+    payment = db.scalar(select(Payment).where(Payment.external_id == external_id))
+    if not payment:
+        return {"ok": True, "ignored": "payment_not_found", "external_id": external_id}
+    if not str(payment.provider or "").startswith("yookassa"):
+        return {"ok": True, "ignored": "not_yookassa_provider", "payment_id": payment.id}
+
+    status_value = str(obj.get("status") or "").strip().lower()
+    yookassa_status = status_value or str(payment.status or "pending").strip().lower()
+    payment_payload = _payment_payload(payment)
+    payment_payload["last_webhook_event"] = event or None
+    payment_payload["yookassa_status"] = yookassa_status
+    if isinstance(obj.get("metadata"), dict):
+        payment_payload["yookassa_metadata"] = obj.get("metadata")
+    confirmation = obj.get("confirmation")
+    if isinstance(confirmation, dict):
+        confirmation_url = str(confirmation.get("confirmation_url") or "").strip()
+        if confirmation_url:
+            payment_payload["confirmation_url"] = confirmation_url
+    payment.payload = payment_payload
+
+    user = db.get(User, payment.user_id) if payment.user_id else None
+    plan = db.get(TariffPlan, payment.plan_id) if payment.plan_id else None
+
+    if yookassa_status == "succeeded" or event == "payment.succeeded":
+        if not user or not plan:
+            return {"ok": True, "ignored": "missing_user_or_plan", "payment_id": payment.id}
+        payment.status = "completed"
+        subscription = _finalize_subscription_payment(
+            db=db,
+            user=user,
+            plan=plan,
+            payment=payment,
+        )
+        return {
+            "ok": True,
+            "processed": "succeeded",
+            "payment_id": payment.id,
+            "subscription_id": subscription.id if subscription else None,
+        }
+
+    if yookassa_status == "canceled" or event == "payment.canceled":
+        payment.status = "canceled"
+        if user:
+            payment_payload = _refund_referral_if_needed(user, payment_payload)
+            payment.payload = payment_payload
+        db.commit()
+        return {"ok": True, "processed": "canceled", "payment_id": payment.id}
+
+    payment.status = "pending"
+    db.commit()
+    return {"ok": True, "processed": "pending", "payment_id": payment.id, "status": yookassa_status}
 
 
 @router.delete("/monitorings/{monitoring_id}")

@@ -68,6 +68,13 @@ export async function purchaseSubscription(payload) {
   return data
 }
 
+export async function getSubscriptionPurchaseStatus(telegramId, paymentId) {
+  const { data } = await client.get(`/subscriptions/purchase/${paymentId}/status`, {
+    params: { telegram_id: telegramId },
+  })
+  return data
+}
+
 export async function onboardingTrial(payload) {
   const { data } = await client.post('/onboarding-trial', payload)
   return data

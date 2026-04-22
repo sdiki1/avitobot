@@ -3,6 +3,7 @@ import {
   getAuthSession,
   getMiniappContent,
   getMonitorings,
+  getSubscriptionPurchaseStatus,
   onboardingTrial,
   getPlans,
   getProfile,
@@ -76,6 +77,13 @@ function getTelegramInitData() {
 
 function getAuthTokenFromQuery() {
   return new URLSearchParams(window.location.search).get('auth')
+}
+
+function getPaymentIdFromQuery() {
+  const raw = new URLSearchParams(window.location.search).get('payment_id')
+  const parsed = Number(raw)
+  if (!Number.isFinite(parsed) || parsed <= 0) return null
+  return Math.trunc(parsed)
 }
 
 function formatDateTime(value) {
@@ -209,9 +217,12 @@ export default function App() {
   const [paramFlags, setParamFlags] = useState({})
 
   const [purchaseBusy, setPurchaseBusy] = useState(false)
+  const [purchaseStatusBusy, setPurchaseStatusBusy] = useState(false)
   const [trialBusy, setTrialBusy] = useState(false)
   const [saveMonitoringBusy, setSaveMonitoringBusy] = useState(false)
   const [stopMonitoringBusy, setStopMonitoringBusy] = useState(false)
+  const [pendingPaymentId, setPendingPaymentId] = useState(null)
+  const [pendingPaymentUrl, setPendingPaymentUrl] = useState('')
   const [selectedType, setSelectedType] = useState(TYPE_OPTIONS[0].id)
   const [useReferralBalance, setUseReferralBalance] = useState(false)
   const [buyDraft, setBuyDraft] = useState({ title: '', url: '' })
@@ -348,6 +359,12 @@ export default function App() {
 
         setTelegramId(resolvedTelegramId)
         await loadData(resolvedTelegramId)
+
+        const returnedPaymentId = getPaymentIdFromQuery()
+        if (returnedPaymentId) {
+          setPendingPaymentId(returnedPaymentId)
+          await checkPurchaseStatus(returnedPaymentId, resolvedTelegramId)
+        }
       } catch (error) {
         const detail = error?.response?.data?.detail || error?.message || 'Ошибка инициализации'
         setStatusMessage(`Ошибка: ${detail}`)
@@ -445,6 +462,27 @@ export default function App() {
         monitoring_url: buyDraft.url || null,
       })
 
+      if (result?.requires_payment) {
+        const paymentId = Number(result?.payment_id || 0)
+        const paymentUrl = String(result?.payment_url || '').trim()
+        if (!paymentId || !paymentUrl) {
+          setStatusMessage('Ошибка: не удалось получить ссылку оплаты')
+          return
+        }
+        setPendingPaymentId(paymentId)
+        setPendingPaymentUrl(paymentUrl)
+        setStatusMessage('Платеж создан. Завершите оплату и затем нажмите «Проверить оплату».')
+
+        if (window.Telegram?.WebApp?.openLink) {
+          window.Telegram.WebApp.openLink(paymentUrl)
+        } else {
+          openExternal(paymentUrl)
+        }
+        return
+      }
+
+      setPendingPaymentId(null)
+      setPendingPaymentUrl('')
       await loadData(telegramId)
       setStatusMessage(
         `Подписка активирована: ${selectedPlan.name}. Итог к оплате: ${result?.amount_rub ?? totalPrice} ₽`,
@@ -455,6 +493,43 @@ export default function App() {
       setStatusMessage(`Ошибка: ${detail}`)
     } finally {
       setPurchaseBusy(false)
+    }
+  }
+
+  const checkPurchaseStatus = async (explicitPaymentId = null, explicitTelegramId = null) => {
+    const paymentId = Number(explicitPaymentId || pendingPaymentId || 0)
+    const effectiveTelegramId = Number(explicitTelegramId || telegramId || 0)
+    if (!effectiveTelegramId || !paymentId || purchaseStatusBusy) return
+    try {
+      setPurchaseStatusBusy(true)
+      const result = await getSubscriptionPurchaseStatus(effectiveTelegramId, paymentId)
+      const paymentUrl = String(result?.payment_url || '').trim()
+      if (paymentUrl) setPendingPaymentUrl(paymentUrl)
+
+      if (result?.requires_payment) {
+        setPendingPaymentId(paymentId)
+        const statusText = result?.payment_status || 'pending'
+        setStatusMessage(`Платеж ожидает оплаты (${statusText}).`)
+        return
+      }
+
+      if (result?.ok && result?.subscription_id) {
+        setPendingPaymentId(null)
+        setPendingPaymentUrl('')
+        await loadData(effectiveTelegramId)
+        setStatusMessage(`Оплата подтверждена. Подписка активирована.`)
+        setSubscriptionView(selectedMonitoring ? SUBSCRIPTION_VIEW.detail : SUBSCRIPTION_VIEW.home)
+        return
+      }
+
+      setPendingPaymentId(null)
+      setPendingPaymentUrl('')
+      setStatusMessage(result?.message || `Статус платежа: ${result?.payment_status || 'неизвестно'}`)
+    } catch (error) {
+      const detail = error?.response?.data?.detail || error?.message || 'Ошибка проверки оплаты'
+      setStatusMessage(`Ошибка: ${detail}`)
+    } finally {
+      setPurchaseStatusBusy(false)
     }
   }
 
@@ -823,8 +898,42 @@ export default function App() {
                 </button>
               )}
 
-              <button type="button" className="primary-btn" onClick={onPurchase} disabled={!selectedPlan || purchaseBusy}>
-                {purchaseBusy ? 'Покупка...' : 'Оплатить через СБП 🔷'}
+              {pendingPaymentId && (
+                <div className="buy-summary">
+                  <div className="summary-balance">Ожидает оплаты: платеж #{pendingPaymentId}</div>
+                  <button
+                    type="button"
+                    className="secondary-btn"
+                    onClick={() => checkPurchaseStatus()}
+                    disabled={purchaseStatusBusy}
+                  >
+                    {purchaseStatusBusy ? 'Проверяем...' : 'Проверить оплату'}
+                  </button>
+                  {pendingPaymentUrl && (
+                    <button
+                      type="button"
+                      className="secondary-btn"
+                      onClick={() => {
+                        if (window.Telegram?.WebApp?.openLink) {
+                          window.Telegram.WebApp.openLink(pendingPaymentUrl)
+                        } else {
+                          openExternal(pendingPaymentUrl)
+                        }
+                      }}
+                    >
+                      Открыть оплату снова
+                    </button>
+                  )}
+                </div>
+              )}
+
+              <button
+                type="button"
+                className="primary-btn"
+                onClick={onPurchase}
+                disabled={!selectedPlan || purchaseBusy || purchaseStatusBusy}
+              >
+                {purchaseBusy ? 'Создание платежа...' : 'Оплатить через ЮKassa (СБП)'}
               </button>
             </section>
           )}

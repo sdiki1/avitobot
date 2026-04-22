@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     speed_surcharge_15_days_rub: int = 500
     speed_surcharge_30_days_rub: int = 800
     parser_proxy_list: str = ""
+    miniapp_public_url: str = "https://t.me"
+    yookassa_shop_id: str = ""
+    yookassa_secret_key: str = ""
+    yookassa_return_url: str = ""
 
     @property
     def proxy_block_cooldown_total_seconds(self) -> int:
@@ -46,6 +50,16 @@ class Settings(BaseSettings):
         if self.proxy_block_cooldown_minutes is not None:
             return max(1, int(self.proxy_block_cooldown_minutes) * 60)
         return 3
+
+    @property
+    def yookassa_return_url_effective(self) -> str:
+        explicit = str(self.yookassa_return_url or "").strip()
+        if explicit:
+            return explicit
+        fallback = str(self.miniapp_public_url or "").strip()
+        if fallback:
+            return fallback
+        return "https://t.me"
 
 
 settings = Settings()

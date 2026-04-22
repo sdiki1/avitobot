@@ -227,14 +227,19 @@ class PurchaseSubscriptionRequest(BaseModel):
 
 class PurchaseSubscriptionResponse(BaseModel):
     ok: bool
-    subscription_id: int
+    requires_payment: bool = False
+    payment_id: int | None = None
+    payment_status: str | None = None
+    payment_url: str | None = None
+    subscription_id: int | None = None
     user_id: int
     plan_id: int
-    ends_at: datetime
+    ends_at: datetime | None = None
     is_trial: bool = False
     amount_rub: int = 0
     referral_used_rub: int = 0
     total_price_rub: int = 0
+    message: str | None = None
 
 
 class OnboardingTrialRequest(BaseModel):

@@ -5,7 +5,7 @@ from app.config import settings
 from app.database import SessionLocal
 from app.routers.admin import router as admin_router
 from app.routers.internal import router as internal_router
-from app.routers.public import router as public_router
+from app.routers.public import router as public_router, webhook_router
 from app.services.bootstrap import init_db, seed_default_plans
 
 
@@ -37,6 +37,7 @@ def health() -> dict:
 
 
 api_prefix = "/api/v1"
+app.include_router(webhook_router)
 app.include_router(public_router, prefix=api_prefix)
 app.include_router(admin_router, prefix=api_prefix)
 app.include_router(internal_router, prefix=api_prefix)
