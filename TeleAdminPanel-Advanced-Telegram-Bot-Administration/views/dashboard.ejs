@@ -66,7 +66,7 @@
     />
     <button type="submit">Сохранить</button>
   </form>
-  <p class="muted">0 дней = пробный период выключен. Пробный период выдается только при первой покупке.</p>
+  <p class="muted">0 дней = пробный период выключен. Пробный период автоматически выдается при первом запуске бота.</p>
 </section>
 
 <section class="card">
@@ -187,17 +187,13 @@
       <% proxies.forEach((proxy) => { %>
         <%
           const isEnvProxy = String(proxy.name || '').startsWith('env-proxy-');
-          const cooldownUntilMs = proxy.cooldown_until ? new Date(proxy.cooldown_until).getTime() : 0;
-          const isCooling = Boolean(proxy.is_active && cooldownUntilMs && cooldownUntilMs > Date.now());
-          const runtimeClass = !proxy.is_active ? 'disabled' : (isCooling ? 'pending' : 'active');
-          const runtimeLabel = !proxy.is_active ? 'disabled' : (isCooling ? 'cooldown' : 'working');
         %>
         <tr>
           <td><%= proxy.id %></td>
           <td><%= proxy.name %></td>
           <td><%= proxy.proxy_url %></td>
           <td><%= isEnvProxy ? '.env' : 'admin' %></td>
-          <td><span class="badge <%= runtimeClass %>"><%= runtimeLabel %></span></td>
+          <td><span class="badge <%= proxy.is_active ? 'active' : 'disabled' %>"><%= proxy.is_active ? 'active' : 'disabled' %></span></td>
         </tr>
       <% }) %>
       </tbody>

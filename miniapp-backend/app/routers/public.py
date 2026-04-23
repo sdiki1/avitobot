@@ -33,6 +33,7 @@ from app.services.helpers import (
     ensure_subscription_monitoring_slots,
     ensure_user_referral_code,
     get_active_links_limit,
+    get_trial_days,
     get_miniapp_content_settings,
     get_active_subscription_query,
     get_available_bot_for_user,
@@ -58,7 +59,6 @@ from app.services.miniapp_auth import (
 
 router = APIRouter(prefix="/public", tags=["public"])
 webhook_router = APIRouter(tags=["webhooks"])
-ONBOARDING_TRIAL_DAYS = 1
 
 
 def _build_bot_link(username: str | None) -> str | None:
@@ -214,6 +214,10 @@ def _require_free_bots_for_new_slots(db: Session, user_id: int, slots_to_add: in
 
 
 def _activate_onboarding_trial(db: Session, user: User) -> UserSubscription | None:
+    trial_days = get_trial_days(db)
+    if trial_days <= 0:
+        return None
+
     existing_subscriptions = db.scalar(select(func.count(UserSubscription.id)).where(UserSubscription.user_id == user.id)) or 0
     if existing_subscriptions > 0:
         return None
@@ -239,7 +243,7 @@ def _activate_onboarding_trial(db: Session, user: User) -> UserSubscription | No
         db,
         user.id,
         plan,
-        duration_days_override=ONBOARDING_TRIAL_DAYS,
+        duration_days_override=trial_days,
         amount_paid_override=0,
         is_trial=True,
     )
@@ -251,7 +255,7 @@ def _activate_onboarding_trial(db: Session, user: User) -> UserSubscription | No
         (
             "🧪 Активирован пробный период\n"
             f"Пользователь: {user.telegram_id}\n"
-            f"Срок: {ONBOARDING_TRIAL_DAYS} дн."
+            f"Срок: {trial_days} дн."
         ),
     )
     return subscription
@@ -458,6 +462,10 @@ def telegram_auth(payload: TelegramAuthRequest, db: Session = Depends(get_db)) -
     )
     apply_referral_code(db, user, payload.referral_code)
     user = ensure_user_referral_code(db, user)
+    created_trial = _activate_onboarding_trial(db, user)
+    if created_trial:
+        db.refresh(user)
+
     if not existed_before:
         username_line = f"@{user.username}" if user.username else "—"
         send_admin_event_message(
@@ -532,10 +540,11 @@ def onboarding_trial(
 ) -> OnboardingTrialResponse:
     assert_telegram_id_match(auth_user, payload.telegram_id)
     user = ensure_user_referral_code(db, auth_user)
+    trial_days = get_trial_days(db)
     subscription = _activate_onboarding_trial(db, user)
     if not subscription:
-        return OnboardingTrialResponse(granted=False, days=ONBOARDING_TRIAL_DAYS, ends_at=None)
-    return OnboardingTrialResponse(granted=True, days=ONBOARDING_TRIAL_DAYS, ends_at=subscription.ends_at)
+        return OnboardingTrialResponse(granted=False, days=trial_days, ends_at=None)
+    return OnboardingTrialResponse(granted=True, days=trial_days, ends_at=subscription.ends_at)
 
 
 @router.get("/plans", response_model=list[TariffPlanResponse])
