@@ -41,6 +41,8 @@ exports.getMonitorings = () => request('/monitorings');
 exports.updateMonitoring = (id, payload) => request(`/monitorings/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
 exports.getTrialSettings = () => request('/trial-settings');
 exports.updateTrialSettings = (payload) => request('/trial-settings', { method: 'PUT', body: JSON.stringify(payload) });
+exports.getReferralSettings = () => request('/referral-settings');
+exports.updateReferralSettings = (payload) => request('/referral-settings', { method: 'PUT', body: JSON.stringify(payload) });
 exports.getMiniappContent = () => request('/miniapp-content');
 exports.updateMiniappContent = (payload) => request('/miniapp-content', { method: 'PUT', body: JSON.stringify(payload) });
 

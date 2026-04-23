@@ -16,6 +16,8 @@ from app.schemas import (
     ProxyCreate,
     ProxyResponse,
     ProxyUpdate,
+    ReferralSettingsResponse,
+    ReferralSettingsUpdate,
     TariffPlanCreate,
     TariffPlanResponse,
     TariffPlanUpdate,
@@ -29,11 +31,13 @@ from app.services.auth import require_admin_token
 from app.services.helpers import (
     activate_user_subscription,
     ensure_subscription_monitoring_slots,
+    get_referral_reward_percent,
     get_miniapp_content_settings,
     get_or_create_user,
     get_trial_days,
     now_utc,
     normalize_monitoring_url,
+    set_referral_reward_percent,
     set_miniapp_content_settings,
     set_trial_days,
 )
@@ -129,6 +133,7 @@ def stats(db: Session = Depends(get_db)) -> dict:
     payments_total = db.scalar(select(func.coalesce(func.sum(Payment.amount_rub), 0)).where(Payment.status == "completed")) or 0
     active_bots = db.scalar(select(func.count(TelegramBot.id)).where(TelegramBot.is_active.is_(True))) or 0
     trial_days = get_trial_days(db)
+    referral_reward_percent = get_referral_reward_percent(db)
 
     return {
         "users_count": users_count,
@@ -137,6 +142,7 @@ def stats(db: Session = Depends(get_db)) -> dict:
         "payments_total_rub": payments_total,
         "active_bots": active_bots,
         "trial_days": trial_days,
+        "referral_reward_percent": referral_reward_percent,
     }
 
 
@@ -149,6 +155,20 @@ def trial_settings(db: Session = Depends(get_db)) -> TrialSettingsResponse:
 def update_trial_settings(payload: TrialSettingsUpdate, db: Session = Depends(get_db)) -> TrialSettingsResponse:
     updated_days = set_trial_days(db, payload.trial_days)
     return TrialSettingsResponse(trial_days=updated_days)
+
+
+@router.get("/referral-settings", response_model=ReferralSettingsResponse)
+def referral_settings(db: Session = Depends(get_db)) -> ReferralSettingsResponse:
+    return ReferralSettingsResponse(referral_reward_percent=get_referral_reward_percent(db))
+
+
+@router.put("/referral-settings", response_model=ReferralSettingsResponse)
+def update_referral_settings(
+    payload: ReferralSettingsUpdate,
+    db: Session = Depends(get_db),
+) -> ReferralSettingsResponse:
+    updated_percent = set_referral_reward_percent(db, payload.referral_reward_percent)
+    return ReferralSettingsResponse(referral_reward_percent=updated_percent)
 
 
 @router.get("/miniapp-content", response_model=MiniAppContentResponse)
@@ -183,11 +203,36 @@ def update_miniapp_content(payload: MiniAppContentUpdate, db: Session = Depends(
 @router.get("/users")
 def users(db: Session = Depends(get_db)) -> list[dict]:
     rows = db.scalars(select(User).order_by(desc(User.created_at))).all()
+    active_links_by_user_id = {
+        int(user_id): int(total or 0)
+        for user_id, total in db.execute(
+            select(Monitoring.user_id, func.count(Monitoring.id))
+            .where(Monitoring.is_active.is_(True))
+            .group_by(Monitoring.user_id)
+        ).all()
+        if user_id is not None
+    }
+    referrals_count_by_user_id = {
+        int(referrer_id): int(total or 0)
+        for referrer_id, total in db.execute(
+            select(User.referred_by_user_id, func.count(User.id))
+            .where(User.referred_by_user_id.is_not(None))
+            .group_by(User.referred_by_user_id)
+        ).all()
+        if referrer_id is not None
+    }
+    referrer_ids = {int(user.referred_by_user_id) for user in rows if user.referred_by_user_id is not None}
+    referrer_by_id: dict[int, User] = {}
+    if referrer_ids:
+        referrer_by_id = {
+            int(referrer.id): referrer
+            for referrer in db.scalars(select(User).where(User.id.in_(referrer_ids))).all()
+        }
+
     result = []
     for user in rows:
-        active_links = db.scalar(
-            select(func.count(Monitoring.id)).where(and_(Monitoring.user_id == user.id, Monitoring.is_active.is_(True)))
-        ) or 0
+        active_links = active_links_by_user_id.get(int(user.id), 0)
+        referrer = referrer_by_id.get(int(user.referred_by_user_id)) if user.referred_by_user_id is not None else None
         result.append(
             {
                 "id": user.id,
@@ -197,6 +242,13 @@ def users(db: Session = Depends(get_db)) -> list[dict]:
                 "created_at": user.created_at,
                 "active_links": active_links,
                 "is_admin": user.is_admin,
+                "referral_code": user.referral_code,
+                "referral_balance_rub": user.referral_balance_rub,
+                "referred_by_user_id": user.referred_by_user_id,
+                "referred_by_telegram_id": referrer.telegram_id if referrer else None,
+                "referred_by_username": referrer.username if referrer else None,
+                "referred_by_full_name": referrer.full_name if referrer else None,
+                "referrals_count": referrals_count_by_user_id.get(int(user.id), 0),
             }
         )
     return result

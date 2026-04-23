@@ -278,6 +278,14 @@ class TrialSettingsUpdate(BaseModel):
     trial_days: int = Field(ge=0)
 
 
+class ReferralSettingsResponse(BaseModel):
+    referral_reward_percent: int = Field(ge=0, le=100)
+
+
+class ReferralSettingsUpdate(BaseModel):
+    referral_reward_percent: int = Field(ge=0, le=100)
+
+
 class MiniAppInfoLink(BaseModel):
     key: str
     title: str

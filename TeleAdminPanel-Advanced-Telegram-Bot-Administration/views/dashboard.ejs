@@ -33,6 +33,10 @@
     <span>Активные боты</span>
     <strong><%= stats.active_bots %></strong>
   </article>
+  <article class="metric">
+    <span>Реф. процент</span>
+    <strong><%= referralSettings?.referral_reward_percent ?? stats?.referral_reward_percent ?? 0 %>%</strong>
+  </article>
 </section>
 
 <section class="card">
@@ -63,6 +67,23 @@
     <button type="submit">Сохранить</button>
   </form>
   <p class="muted">0 дней = пробный период выключен. Пробный период выдается только при первой покупке.</p>
+</section>
+
+<section class="card">
+  <h2>Реферальная система</h2>
+  <form class="form-grid two" action="<%= adminBase %>/referral-settings/update" method="post">
+    <input
+      name="referral_reward_percent"
+      type="number"
+      min="0"
+      max="100"
+      value="<%= referralSettings?.referral_reward_percent ?? stats?.referral_reward_percent ?? 0 %>"
+      placeholder="Процент вознаграждения"
+      required
+    />
+    <button type="submit">Сохранить</button>
+  </form>
+  <p class="muted">Процент начисляется рефереру от суммы оплаченной подписки.</p>
 </section>
 
 <section class="card">

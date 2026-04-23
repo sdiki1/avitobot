@@ -27,6 +27,8 @@
           <th>ID</th>
           <th>Telegram ID</th>
           <th>Имя</th>
+          <th>Реферер</th>
+          <th>Рефералов</th>
           <th>Ссылок</th>
           <th>Роль</th>
           <th>Зарегистрирован</th>
@@ -41,7 +43,25 @@
             <div class="user-meta">
               <strong><%= user.full_name || user.username || '—' %></strong>
               <% if (user.username) { %><small>@<%= user.username %></small><% } %>
+              <% if (user.referral_code) { %><small>Код: <%= user.referral_code %></small><% } %>
+              <small>Реф. баланс: <%= user.referral_balance_rub ?? 0 %> ₽</small>
             </div>
+          </td>
+          <td>
+            <% if (user.referred_by_user_id) { %>
+              <div class="user-meta">
+                <strong><%= user.referred_by_full_name || user.referred_by_username || 'Пользователь' %></strong>
+                <% if (user.referred_by_username) { %><small>@<%= user.referred_by_username %></small><% } %>
+                <% if (user.referred_by_telegram_id) { %><small>ID: <%= user.referred_by_telegram_id %></small><% } %>
+              </div>
+            <% } else { %>
+              <span class="muted">—</span>
+            <% } %>
+          </td>
+          <td>
+            <span class="badge <%= (user.referrals_count || 0) > 0 ? 'active' : 'disabled' %>">
+              <%= user.referrals_count || 0 %>
+            </span>
           </td>
           <td>
             <span class="badge <%= user.active_links > 0 ? 'active' : 'disabled' %>">

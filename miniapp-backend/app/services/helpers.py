@@ -20,6 +20,7 @@ from app.models import AppSetting, Monitoring, ProxyConfig, TariffPlan, Telegram
 
 logger = logging.getLogger(__name__)
 TRIAL_DAYS_SETTING_KEY = "trial_days"
+REFERRAL_REWARD_PERCENT_SETTING_KEY = "referral_reward_percent"
 DEFAULT_TRIAL_DAYS = 3
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -214,7 +215,7 @@ def reward_referrer_for_payment(db: Session, paying_user: User, paid_amount_rub:
     if paying_user.referred_by_user_id is None:
         return 0
 
-    reward_percent = max(0, int(settings.referral_reward_percent))
+    reward_percent = get_referral_reward_percent(db)
     if reward_percent <= 0:
         return 0
 
@@ -368,6 +369,29 @@ def set_trial_days(db: Session, trial_days: int) -> int:
     setting = db.scalar(select(AppSetting).where(AppSetting.key == TRIAL_DAYS_SETTING_KEY))
     if not setting:
         setting = AppSetting(key=TRIAL_DAYS_SETTING_KEY, value=str(normalized))
+        db.add(setting)
+    else:
+        setting.value = str(normalized)
+    db.commit()
+    return normalized
+
+
+def get_referral_reward_percent(db: Session) -> int:
+    setting = db.scalar(select(AppSetting).where(AppSetting.key == REFERRAL_REWARD_PERCENT_SETTING_KEY))
+    if not setting:
+        return max(0, min(100, int(settings.referral_reward_percent)))
+    try:
+        reward_percent = int(setting.value)
+    except (TypeError, ValueError):
+        return max(0, min(100, int(settings.referral_reward_percent)))
+    return max(0, min(100, reward_percent))
+
+
+def set_referral_reward_percent(db: Session, reward_percent: int) -> int:
+    normalized = max(0, min(100, int(reward_percent)))
+    setting = db.scalar(select(AppSetting).where(AppSetting.key == REFERRAL_REWARD_PERCENT_SETTING_KEY))
+    if not setting:
+        setting = AppSetting(key=REFERRAL_REWARD_PERCENT_SETTING_KEY, value=str(normalized))
         db.add(setting)
     else:
         setting.value = str(normalized)

@@ -33,6 +33,17 @@ function normalizeDateInput(value) {
   return raw || null;
 }
 
+function normalizePercent(value) {
+  const parsed = toInt(value);
+  if (parsed === null) {
+    throw new Error('Процент реферальной системы должен быть числом');
+  }
+  if (parsed < 0 || parsed > 100) {
+    throw new Error('Процент реферальной системы должен быть в диапазоне 0-100');
+  }
+  return parsed;
+}
+
 function normalizePlanFormat(value) {
   const normalized = String(value || '').trim().toLowerCase();
   if (normalized === 'speed' || normalized === 'ускоренная' || normalized === 'скоростная') return 'speed';
@@ -97,12 +108,13 @@ function withAdminBase(path) {
 
 router.get('/', async (req, res) => {
   try {
-    const [stats, plans, proxies, bots, trialSettings, miniappContent] = await Promise.all([
+    const [stats, plans, proxies, bots, trialSettings, referralSettings, miniappContent] = await Promise.all([
       api.getStats(),
       api.getPlans(),
       api.getProxies(),
       api.getBots(),
       api.getTrialSettings(),
+      api.getReferralSettings(),
       api.getMiniappContent(),
     ]);
     res.render('dashboard', {
@@ -111,6 +123,7 @@ router.get('/', async (req, res) => {
       proxies,
       bots,
       trialSettings,
+      referralSettings,
       miniappContent,
       error: null,
       success: req.query.success || null,
@@ -122,6 +135,7 @@ router.get('/', async (req, res) => {
       proxies: [],
       bots: [],
       trialSettings: { trial_days: 0 },
+      referralSettings: { referral_reward_percent: 10 },
       miniappContent: DEFAULT_MINIAPP_CONTENT,
       error: error.message,
       success: null,
@@ -379,6 +393,17 @@ router.post('/trial-settings/update', async (req, res) => {
       trial_days: toInt(req.body.trial_days) || 0,
     });
     res.redirect(withAdminBase('/?success=Пробный+период+обновлен'));
+  } catch (error) {
+    res.redirect(withAdminBase(`/?success=${encodeURIComponent(`Ошибка: ${error.message}`)}`));
+  }
+});
+
+router.post('/referral-settings/update', async (req, res) => {
+  try {
+    await api.updateReferralSettings({
+      referral_reward_percent: normalizePercent(req.body.referral_reward_percent),
+    });
+    res.redirect(withAdminBase('/?success=Процент+реферальной+системы+обновлен'));
   } catch (error) {
     res.redirect(withAdminBase(`/?success=${encodeURIComponent(`Ошибка: ${error.message}`)}`));
   }
