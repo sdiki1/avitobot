@@ -22,6 +22,7 @@ const PLAN_FORMAT_LABELS = {
   standard: 'Обычная',
   speed: 'Ускоренная',
 };
+const DEFAULT_PROXY_EXPIRES_DAYS = 30;
 
 function toInt(value) {
   const parsed = Number(value);
@@ -51,8 +52,8 @@ function dateInputFromDays(value) {
   return `${year}-${month}-${day}`;
 }
 
-function normalizeProxyExpiresOn(body) {
-  const expiresByDays = dateInputFromDays(body.expires_days);
+function normalizeProxyExpiresOn(body, defaultDays = null) {
+  const expiresByDays = dateInputFromDays(body.expires_days || defaultDays);
   if (expiresByDays) return expiresByDays;
   return normalizeDateInput(body.expires_on);
 }
@@ -242,7 +243,7 @@ router.post('/proxies', async (req, res) => {
       proxy_url: req.body.proxy_url,
       change_ip_url: req.body.change_ip_url || null,
       is_active: req.body.is_active === 'on',
-      expires_on: normalizeProxyExpiresOn(req.body),
+      expires_on: normalizeProxyExpiresOn(req.body, DEFAULT_PROXY_EXPIRES_DAYS),
     });
     res.redirect(withAdminBase('/proxies?success=Прокси+добавлен'));
   } catch (error) {
