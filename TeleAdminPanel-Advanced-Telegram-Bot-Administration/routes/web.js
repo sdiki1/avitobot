@@ -33,6 +33,47 @@ function normalizeDateInput(value) {
   return raw || null;
 }
 
+function dateInputFromDays(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+
+  const days = toInt(raw);
+  if (days === null || !Number.isInteger(days) || days <= 0) {
+    throw new Error('Срок прокси должен быть целым числом больше 0 дней');
+  }
+
+  const date = new Date();
+  date.setHours(12, 0, 0, 0);
+  date.setDate(date.getDate() + days);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function normalizeProxyExpiresOn(body) {
+  const expiresByDays = dateInputFromDays(body.expires_days);
+  if (expiresByDays) return expiresByDays;
+  return normalizeDateInput(body.expires_on);
+}
+
+function emptyStats() {
+  return {
+    users_count: 0,
+    active_monitorings: 0,
+    active_subscriptions: 0,
+    payments_total_rub: 0,
+    payments_month_rub: 0,
+    payments_month_label: '',
+    active_bots: 0,
+    active_proxies: 0,
+    required_proxies: 0,
+    proxy_capacity_monitorings: 0,
+    missing_proxies: 0,
+    proxy_capacity_ok: true,
+  };
+}
+
 function normalizePercent(value) {
   const parsed = toInt(value);
   if (parsed === null) {
@@ -108,8 +149,8 @@ function withAdminBase(path) {
 
 router.get('/', async (req, res) => {
   try {
-    const [stats, plans, proxies, bots, trialSettings, referralSettings, miniappContent] = await Promise.all([
-      api.getStats(),
+    const stats = await api.getStats();
+    const [plans, proxies, bots, trialSettings, referralSettings, miniappContent] = await Promise.all([
       api.getPlans(),
       api.getProxies(),
       api.getBots(),
@@ -130,7 +171,7 @@ router.get('/', async (req, res) => {
     });
   } catch (error) {
     res.render('dashboard', {
-      stats: { users_count: 0, active_monitorings: 0, active_subscriptions: 0, payments_total_rub: 0, active_bots: 0 },
+      stats: emptyStats(),
       plans: [],
       proxies: [],
       bots: [],
@@ -186,10 +227,11 @@ router.post('/plans/:id/delete', async (req, res) => {
 
 router.get('/proxies', async (req, res) => {
   try {
+    const stats = await api.getStats();
     const proxies = await api.getProxies();
-    res.render('proxies', { proxies, error: null, success: req.query.success || null });
+    res.render('proxies', { proxies, stats, error: null, success: req.query.success || null });
   } catch (error) {
-    res.render('proxies', { proxies: [], error: error.message, success: null });
+    res.render('proxies', { proxies: [], stats: emptyStats(), error: error.message, success: null });
   }
 });
 
@@ -200,7 +242,7 @@ router.post('/proxies', async (req, res) => {
       proxy_url: req.body.proxy_url,
       change_ip_url: req.body.change_ip_url || null,
       is_active: req.body.is_active === 'on',
-      expires_on: normalizeDateInput(req.body.expires_on),
+      expires_on: normalizeProxyExpiresOn(req.body),
     });
     res.redirect(withAdminBase('/proxies?success=Прокси+добавлен'));
   } catch (error) {
@@ -215,7 +257,7 @@ router.post('/proxies/:id/update', async (req, res) => {
       proxy_url: req.body.proxy_url,
       change_ip_url: req.body.change_ip_url || null,
       is_active: req.body.is_active === 'on',
-      expires_on: normalizeDateInput(req.body.expires_on),
+      expires_on: normalizeProxyExpiresOn(req.body),
     });
     res.redirect(withAdminBase('/proxies?success=Прокси+обновлен'));
   } catch (error) {

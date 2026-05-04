@@ -35,8 +35,10 @@ from app.services.helpers import (
     get_miniapp_content_settings,
     get_or_create_user,
     get_trial_days,
+    maintain_proxy_pool,
     now_utc,
     normalize_monitoring_url,
+    proxy_capacity_status,
     set_referral_reward_percent,
     set_miniapp_content_settings,
     set_trial_days,
@@ -119,8 +121,19 @@ def _normalize_duration_label(value: str | None, duration_days: int) -> str:
     return f"{int(duration_days)} дней"
 
 
+def _current_month_bounds() -> tuple:
+    month_start = now_utc().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    if month_start.month == 12:
+        next_month_start = month_start.replace(year=month_start.year + 1, month=1)
+    else:
+        next_month_start = month_start.replace(month=month_start.month + 1)
+    return month_start, next_month_start
+
+
 @router.get("/stats")
 def stats(db: Session = Depends(get_db)) -> dict:
+    maintain_proxy_pool(db)
+    month_start, next_month_start = _current_month_bounds()
     users_count = db.scalar(select(func.count(User.id))) or 0
     active_monitorings = db.scalar(
         select(func.count(Monitoring.id)).where(Monitoring.is_active.is_(True))
@@ -131,18 +144,35 @@ def stats(db: Session = Depends(get_db)) -> dict:
         )
     ) or 0
     payments_total = db.scalar(select(func.coalesce(func.sum(Payment.amount_rub), 0)).where(Payment.status == "completed")) or 0
+    payments_month = db.scalar(
+        select(func.coalesce(func.sum(Payment.amount_rub), 0)).where(
+            and_(
+                Payment.status == "completed",
+                Payment.created_at >= month_start,
+                Payment.created_at < next_month_start,
+            )
+        )
+    ) or 0
     active_bots = db.scalar(select(func.count(TelegramBot.id)).where(TelegramBot.is_active.is_(True))) or 0
     trial_days = get_trial_days(db)
     referral_reward_percent = get_referral_reward_percent(db)
+    proxy_capacity = proxy_capacity_status(db)
 
     return {
         "users_count": users_count,
         "active_monitorings": active_monitorings,
         "active_subscriptions": active_subscriptions,
         "payments_total_rub": payments_total,
+        "payments_month_rub": payments_month,
+        "payments_month_label": month_start.strftime("%m.%Y"),
         "active_bots": active_bots,
         "trial_days": trial_days,
         "referral_reward_percent": referral_reward_percent,
+        "active_proxies": proxy_capacity["active_proxies"],
+        "required_proxies": proxy_capacity["required_proxies"],
+        "proxy_capacity_monitorings": proxy_capacity["capacity_monitorings"],
+        "missing_proxies": proxy_capacity["missing_proxies"],
+        "proxy_capacity_ok": proxy_capacity["ok"],
     }
 
 

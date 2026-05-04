@@ -12,7 +12,7 @@ from urllib import request as urllib_request
 from urllib.parse import quote, urlsplit, urlunsplit
 from uuid import uuid4
 
-from sqlalchemy import Select, and_, func, select
+from sqlalchemy import Select, and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -21,6 +21,7 @@ from app.models import AppSetting, Monitoring, ProxyConfig, TariffPlan, Telegram
 logger = logging.getLogger(__name__)
 TRIAL_DAYS_SETTING_KEY = "trial_days"
 REFERRAL_REWARD_PERCENT_SETTING_KEY = "referral_reward_percent"
+PROXY_CAPACITY_WARNING_SETTING_KEY = "proxy_capacity_last_warning_signature"
 DEFAULT_TRIAL_DAYS = 3
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -47,7 +48,11 @@ STATIC_MESSAGE_PHOTOS: dict[str, list[Path]] = {
     ],
     "link_change": [
         BACKEND_ROOT / "msg_link_change.jpeg",
+        BACKEND_ROOT / "msg_link_change.jpg",
+        BACKEND_ROOT / "msg_link_change.png",
         PROJECT_ROOT / "msg_link_change.jpeg",
+        PROJECT_ROOT / "msg_link_change.jpg",
+        PROJECT_ROOT / "msg_link_change.png",
     ],
     "monitoring_start": [
         BACKEND_ROOT / "msg_monitoring_start.jpeg",
@@ -571,6 +576,135 @@ def send_admin_event_message(db: Session, text: str) -> int:
     return sent
 
 
+def _active_monitorings_count(db: Session) -> int:
+    total = db.scalar(
+        select(func.count(Monitoring.id)).where(
+            and_(
+                Monitoring.is_active.is_(True),
+                Monitoring.link_configured.is_(True),
+            )
+        )
+    )
+    return int(total or 0)
+
+
+def _usable_admin_proxies_count(db: Session) -> int:
+    today = now_utc().date()
+    total = db.scalar(
+        select(func.count(ProxyConfig.id)).where(
+            and_(
+                ProxyConfig.is_active.is_(True),
+                ProxyConfig.name.notlike("env-proxy-%"),
+                or_(ProxyConfig.expires_on.is_(None), ProxyConfig.expires_on >= today),
+            )
+        )
+    )
+    return int(total or 0)
+
+
+def proxy_capacity_status(db: Session) -> dict[str, int | bool]:
+    active_monitorings = _active_monitorings_count(db)
+    active_proxies = _usable_admin_proxies_count(db)
+    required_proxies = active_monitorings * 2
+    capacity_monitorings = active_proxies // 2
+    missing_proxies = max(0, required_proxies - active_proxies)
+    return {
+        "active_monitorings": active_monitorings,
+        "active_proxies": active_proxies,
+        "required_proxies": required_proxies,
+        "capacity_monitorings": capacity_monitorings,
+        "missing_proxies": missing_proxies,
+        "ok": missing_proxies == 0,
+    }
+
+
+def cleanup_expired_proxies(db: Session) -> int:
+    today = now_utc().date()
+    expired = db.scalars(
+        select(ProxyConfig)
+        .where(
+            and_(
+                ProxyConfig.name.notlike("env-proxy-%"),
+                ProxyConfig.expires_on.is_not(None),
+                ProxyConfig.expires_on < today,
+            )
+        )
+        .order_by(ProxyConfig.expires_on.asc(), ProxyConfig.id.asc())
+    ).all()
+    if not expired:
+        return 0
+
+    deleted_rows = [
+        {
+            "name": proxy.name,
+            "proxy_url": proxy.proxy_url,
+            "expires_on": proxy.expires_on,
+        }
+        for proxy in expired
+    ]
+    for proxy in expired:
+        db.delete(proxy)
+    db.commit()
+
+    preview = "\n".join(
+        f"- {row['name']} ({row['expires_on'].strftime('%d.%m.%Y')})"
+        for row in deleted_rows[:10]
+        if row["expires_on"]
+    )
+    if len(deleted_rows) > 10:
+        preview += f"\n...и еще {len(deleted_rows) - 10}"
+    send_admin_event_message(
+        db,
+        (
+            "Автоудалены истекшие прокси.\n"
+            f"Удалено: {len(deleted_rows)}\n"
+            f"{preview}\n\n"
+            "Проверьте пул прокси и добавьте новые, если активных мониторингов больше, чем proxy_count // 2."
+        ),
+    )
+    return len(deleted_rows)
+
+
+def notify_proxy_capacity_if_needed(db: Session) -> bool:
+    status = proxy_capacity_status(db)
+    active_monitorings = int(status["active_monitorings"])
+    active_proxies = int(status["active_proxies"])
+    missing_proxies = int(status["missing_proxies"])
+    if missing_proxies <= 0:
+        setting = db.scalar(select(AppSetting).where(AppSetting.key == PROXY_CAPACITY_WARNING_SETTING_KEY))
+        if setting and setting.value:
+            setting.value = ""
+            db.commit()
+        return False
+
+    signature = f"{active_monitorings}:{active_proxies}:{missing_proxies}"
+    setting = db.scalar(select(AppSetting).where(AppSetting.key == PROXY_CAPACITY_WARNING_SETTING_KEY))
+    if setting and setting.value == signature:
+        return False
+
+    sent = send_admin_event_message(
+        db,
+        (
+            "Недостаточно прокси для активных мониторингов.\n"
+            f"Активных мониторингов: {active_monitorings}\n"
+            f"Активных прокси: {active_proxies}\n"
+            f"Нужно минимум: {active_monitorings * 2}\n"
+            f"Добавьте прокси: {missing_proxies}\n\n"
+            "Правило: на 1 мониторинг должно быть 2 рабочих прокси."
+        ),
+    )
+    if sent <= 0:
+        return False
+
+    if not setting:
+        setting = AppSetting(key=PROXY_CAPACITY_WARNING_SETTING_KEY, value=signature)
+        db.add(setting)
+    else:
+        setting.value = signature
+    db.commit()
+    return True
+
+
 def notify_expiring_proxies(db: Session) -> int:
     today = now_utc().date()
     tomorrow = today + timedelta(days=1)
@@ -609,6 +743,19 @@ def notify_expiring_proxies(db: Session) -> int:
     if notified:
         db.commit()
     return notified
+
+
+def maintain_proxy_pool(db: Session) -> dict[str, int | bool]:
+    deleted_expired = cleanup_expired_proxies(db)
+    expiring_notified = notify_expiring_proxies(db)
+    capacity_notified = notify_proxy_capacity_if_needed(db)
+    status = proxy_capacity_status(db)
+    return {
+        **status,
+        "deleted_expired": deleted_expired,
+        "expiring_notified": expiring_notified,
+        "capacity_notified": capacity_notified,
+    }
 
 
 def send_subscription_assigned_bot_message(db: Session, user: User) -> bool:

@@ -86,7 +86,11 @@ STATIC_MESSAGE_PHOTOS = {
     ],
     "link_change": [
         APP_ROOT / "msg_link_change.jpeg",
+        APP_ROOT / "msg_link_change.jpg",
+        APP_ROOT / "msg_link_change.png",
         PROJECT_ROOT / "msg_link_change.jpeg",
+        PROJECT_ROOT / "msg_link_change.jpg",
+        PROJECT_ROOT / "msg_link_change.png",
     ],
     "monitoring_start": [
         APP_ROOT / "msg_monitoring_start.jpeg",

@@ -25,6 +25,7 @@ from app.services.helpers import (
     format_new_item_message,
     format_price_change_message,
     get_active_subscription_query,
+    maintain_proxy_pool,
     normalize_monitoring_url,
     normalize_proxy_url,
     now_utc,
@@ -208,6 +209,7 @@ def mark_proxy_blocked(payload: InternalProxyBlockedRequest, db: Session = Depen
 
 @router.get("/monitorings/active")
 def active_monitorings(db: Session = Depends(get_db)) -> list[dict]:
+    maintain_proxy_pool(db)
     monitorings = db.scalars(
         select(Monitoring)
         .where(
@@ -219,12 +221,14 @@ def active_monitorings(db: Session = Depends(get_db)) -> list[dict]:
         .order_by(Monitoring.id.asc())
     ).all()
     now = now_utc()
+    today = now.date()
     proxies = db.scalars(
         select(ProxyConfig)
         .where(
             and_(
                 ProxyConfig.is_active.is_(True),
                 or_(ProxyConfig.cooldown_until.is_(None), ProxyConfig.cooldown_until <= now),
+                or_(ProxyConfig.expires_on.is_(None), ProxyConfig.expires_on >= today),
                 ProxyConfig.name.notlike("env-proxy-%"),
             )
         )

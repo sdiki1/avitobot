@@ -12,6 +12,16 @@
   <% } %>
 </section>
 
+<% if (stats && !stats.proxy_capacity_ok) { %>
+  <section class="card">
+    <div class="alert error">
+      Недостаточно прокси: активных мониторингов <%= stats.active_monitorings %>,
+      рабочих прокси <%= stats.active_proxies %>, нужно минимум <%= stats.required_proxies %>.
+      Добавьте еще <%= stats.missing_proxies %> прокси.
+    </div>
+  </section>
+<% } %>
+
 <section class="grid metrics">
   <article class="metric">
     <span>Пользователи</span>
@@ -26,12 +36,16 @@
     <strong><%= stats.active_subscriptions %></strong>
   </article>
   <article class="metric">
-    <span>Выручка</span>
-    <strong><%= stats.payments_total_rub %> ₽</strong>
+    <span>Выручка за месяц<%= stats.payments_month_label ? ` · ${stats.payments_month_label}` : '' %></span>
+    <strong><%= stats.payments_month_rub ?? 0 %> ₽</strong>
   </article>
   <article class="metric">
     <span>Активные боты</span>
     <strong><%= stats.active_bots %></strong>
+  </article>
+  <article class="metric">
+    <span>Рабочие прокси</span>
+    <strong><%= stats.active_proxies ?? 0 %>/<%= stats.required_proxies ?? 0 %></strong>
   </article>
   <article class="metric">
     <span>Реф. процент</span>
@@ -42,13 +56,19 @@
 <section class="card">
   <h2>Быстрая активация подписки</h2>
   <form class="form-grid" action="<%= adminBase %>/subscriptions/activate" method="post">
-    <input name="telegram_id" type="number" placeholder="Telegram ID пользователя" required />
-    <select name="plan_id" required>
-      <option value="">Выберите тариф</option>
-      <% plans.forEach((plan) => { %>
-        <option value="<%= plan.id %>"><%= plan.name %> · <%= plan.price_rub %> ₽</option>
-      <% }) %>
-    </select>
+    <label class="field">
+      <span>Telegram ID</span>
+      <input name="telegram_id" type="number" placeholder="123456789" required />
+    </label>
+    <label class="field">
+      <span>Тариф подписки</span>
+      <select name="plan_id" required>
+        <option value="">Выберите тариф</option>
+        <% plans.forEach((plan) => { %>
+          <option value="<%= plan.id %>"><%= plan.name %> · <%= plan.price_rub %> ₽</option>
+        <% }) %>
+      </select>
+    </label>
     <button type="submit">Активировать</button>
   </form>
 </section>
