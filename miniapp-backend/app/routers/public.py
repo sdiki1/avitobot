@@ -624,6 +624,7 @@ def profile(
         if base:
             referral_link = f"{base}?start={user.referral_code}"
 
+    trial_days = get_trial_days(db)
     payload = {
         "user": UserResponse.model_validate(user),
         "active_monitorings": active_monitorings or 0,
@@ -631,7 +632,8 @@ def profile(
         "referral_link": referral_link,
         "subscription": None,
         "subscriptions": [],
-        "can_activate_trial": len(subscriptions) == 0,
+        "can_activate_trial": len(subscriptions) == 0 and trial_days > 0,
+        "trial_days": trial_days,
         "assigned_bots": [],
     }
     if subscription:

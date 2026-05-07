@@ -397,10 +397,10 @@ router.post('/bots/:id/delete', async (req, res) => {
 
 router.get('/payments', async (req, res) => {
   try {
-    const [payments, plans] = await Promise.all([api.getPayments(), api.getPlans()]);
-    res.render('payments', { payments, plans, error: null, success: req.query.success || null });
+    const [payments, plans, stats] = await Promise.all([api.getPayments(), api.getPlans(), api.getStats()]);
+    res.render('payments', { payments, plans, stats, error: null, success: req.query.success || null });
   } catch (error) {
-    res.render('payments', { payments: [], plans: [], error: error.message, success: null });
+    res.render('payments', { payments: [], plans: [], stats: emptyStats(), error: error.message, success: null });
   }
 });
 

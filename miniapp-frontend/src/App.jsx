@@ -603,6 +603,9 @@ export default function App() {
     }
   }
 
+  const trialDays = profile?.trial_days ?? 0
+  const trialLabel = trialDays > 0 ? `${trialDays} ${trialDays === 1 ? 'день' : trialDays < 5 ? 'дня' : 'дней'}` : ''
+
   const onActivateTrial = async () => {
     if (!telegramId || trialBusy) return
     try {
@@ -610,7 +613,7 @@ export default function App() {
       const result = await onboardingTrial({ telegram_id: Number(telegramId) })
       await loadData(telegramId)
       if (result?.granted) {
-        setStatusMessage('Пробный период 24 часа активирован')
+        setStatusMessage(`Пробный период ${trialLabel} активирован`)
       } else {
         setStatusMessage('Пробный период уже использован или недоступен')
       }
@@ -904,6 +907,12 @@ export default function App() {
                 ))}
               </div>
 
+              {profile?.can_activate_trial && trialDays > 0 && (
+                <button type="button" className="secondary-btn" onClick={onActivateTrial} disabled={trialBusy}>
+                  {trialBusy ? 'Активация...' : `Начать пробный период (${trialLabel})`}
+                </button>
+              )}
+
               <button
                 type="button"
                 className="primary-btn purchase-bottom-btn"
@@ -1103,12 +1112,6 @@ export default function App() {
                   <span>Использовать реф. баланс для оплаты</span>
                 </button>
               </div>
-
-              {profile?.can_activate_trial && (
-                <button type="button" className="secondary-btn" onClick={onActivateTrial} disabled={trialBusy}>
-                  {trialBusy ? 'Активация...' : 'Включить пробный период 24 часа'}
-                </button>
-              )}
 
               {pendingPaymentId && (
                 <div className="buy-summary">

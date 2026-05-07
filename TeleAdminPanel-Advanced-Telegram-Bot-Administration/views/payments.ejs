@@ -1,5 +1,20 @@
 <%- include('partials/header', { title: 'Платежи' }) %>
 
+<section class="grid metrics">
+  <article class="metric">
+    <span>Выручка за месяц<%= stats?.payments_month_label ? ` · ${stats.payments_month_label}` : '' %></span>
+    <strong><%= stats?.payments_month_rub ?? 0 %> ₽</strong>
+  </article>
+  <article class="metric">
+    <span>Выручка всего</span>
+    <strong><%= stats?.payments_total_rub ?? 0 %> ₽</strong>
+  </article>
+  <article class="metric">
+    <span>Активные подписки</span>
+    <strong><%= stats?.active_subscriptions ?? 0 %></strong>
+  </article>
+</section>
+
 <section class="card">
   <h1>Платежи</h1>
   <% if (success) { %>

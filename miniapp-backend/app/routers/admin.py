@@ -532,6 +532,12 @@ def update_plan(plan_id: int, payload: TariffPlanUpdate, db: Session = Depends(g
         setattr(plan, key, value)
     if not (plan.duration_label or "").strip():
         plan.duration_label = _normalize_duration_label(None, int(plan.duration_days))
+
+    if "name" in update_data:
+        conflict = db.scalar(select(TariffPlan).where(and_(TariffPlan.name == plan.name, TariffPlan.id != plan_id)))
+        if conflict:
+            plan.name = f"{plan.name} #{plan_id}"
+
     db.commit()
     db.refresh(plan)
     return plan
