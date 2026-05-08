@@ -75,14 +75,6 @@
           const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
           const isExpired = Boolean(expiresOn && expiresOn < todayIso);
           const isCoolingDown = Boolean(cooldownUntil && cooldownUntil > now);
-          const statusClass = proxy.is_active && !isExpired && !isCoolingDown ? 'active' : 'disabled';
-          const statusText = !proxy.is_active
-            ? 'выключен'
-            : isExpired
-              ? 'просрочен'
-              : isCoolingDown
-                ? 'кулдаун'
-                : 'работает';
         %>
         <tr>
           <td><%= proxy.id %></td>
@@ -101,17 +93,7 @@
               <span class="muted">—</span>
             <% } %>
           </td>
-          <td>
-            <span class="badge <%= statusClass %>"><%= statusText %></span>
-            <% if (isCoolingDown && cooldownUntil) { %>
-              <br />
-              <span class="muted">пауза до <%= cooldownUntil.toLocaleString('ru-RU') %></span>
-            <% } %>
-            <% if (proxy.last_block_status) { %>
-              <br />
-              <span class="muted">последний блок: HTTP <%= proxy.last_block_status %></span>
-            <% } %>
-          </td>
+          <td>—</td>
           <td>
             <form class="form-grid two" action="<%= adminBase %>/proxies/<%= proxy.id %>/update" method="post">
               <label class="field">
