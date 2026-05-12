@@ -241,10 +241,7 @@ def _is_avito_url(value: str) -> bool:
     return bool(_AVITO_HOST_RE.match(value.strip()))
 
 
-_LINK_ERROR_TEXT = (
-    "Нужна ссылка на Avito: формат https://avito.ru/..., https://www.avito.ru/..., "
-    "https://avito.com/... или https://www.avito.com/..."
-)
+_LINK_ERROR_TEXT = "Нужна ссылка на Avito: формат https://avito.ru/..."
 
 
 def _fit_photo_caption(value: str, max_len: int = 1024) -> str:
@@ -917,14 +914,8 @@ def build_router(bot_id: int, backend: BackendAPI, *, is_primary: bool = False) 
 
     async def _prompt_change_link(message: Message, state: FSMContext) -> None:
         await state.set_state(LinkChangeState.waiting_url)
-        await _answer_with_static_photo(
-            message,
-            (
-                "Отправьте новую ссылку на мониторинг с Avito: формат "
-                "https://avito.ru/..., https://www.avito.ru/..., "
-                "https://avito.com/... или https://www.avito.com/..."
-            ),
-            photo_key="link_change",
+        await message.answer(
+            "Отправьте новую ссылку на мониторинг с Avito: формат https://avito.ru/...",
             reply_markup=monitoring_actions_keyboard(message.from_user.id, include_cancel=True),
         )
 
