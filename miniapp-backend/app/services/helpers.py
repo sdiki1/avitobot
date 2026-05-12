@@ -245,6 +245,44 @@ def get_active_subscription_query(user_id: int) -> Select[tuple[UserSubscription
     ).order_by(UserSubscription.ends_at.desc())
 
 
+def get_monitoring_subscription_map(db: Session, user_id: int) -> dict[int, dict]:
+    """Распределяет активные подписки по слотам ботов пользователя.
+
+    Каждая подписка раскладывается в links_limit слотов, слоты сортируются по
+    сроку окончания подписки (по убыванию — самые «свежие» вперед). Мониторинги
+    с ботами сортируются по id asc и сопоставляются 1-к-1 со слотами.
+    """
+    subs = db.scalars(
+        select(UserSubscription)
+        .where(and_(UserSubscription.user_id == user_id, UserSubscription.ends_at > now_utc()))
+        .order_by(UserSubscription.ends_at.desc())
+    ).all()
+
+    slots: list[dict] = []
+    for sub in subs:
+        limit = int(sub.plan.links_limit) if sub.plan and sub.plan.links_limit else 0
+        for _ in range(limit):
+            slots.append(
+                {
+                    "subscription_id": sub.id,
+                    "subscription_ends_at": sub.ends_at,
+                    "subscription_plan_name": sub.plan.name if sub.plan else "Без тарифа",
+                    "subscription_is_trial": bool(sub.is_trial),
+                }
+            )
+
+    monitorings = db.scalars(
+        select(Monitoring)
+        .where(and_(Monitoring.user_id == user_id, Monitoring.bot_id.is_not(None)))
+        .order_by(Monitoring.id.asc())
+    ).all()
+
+    mapping: dict[int, dict] = {}
+    for mon, slot in zip(monitorings, slots):
+        mapping[int(mon.id)] = slot
+    return mapping
+
+
 def get_active_links_limit(db: Session, user_id: int) -> int:
     total = db.scalar(
         select(func.coalesce(func.sum(TariffPlan.links_limit), 0))

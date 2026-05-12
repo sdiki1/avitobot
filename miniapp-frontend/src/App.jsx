@@ -91,6 +91,11 @@ function formatDateTime(value) {
   return new Date(value).toLocaleString('ru-RU')
 }
 
+function formatDate(value) {
+  if (!value) return '—'
+  return new Date(value).toLocaleDateString('ru-RU')
+}
+
 function buildSubscriptionBotLink(bot) {
   const base = bot?.bot_link
   if (!base) return null
@@ -898,6 +903,13 @@ export default function App() {
                         {botShortName(monitoring.bot)} • {monitoring.is_active ? 'в работе' : 'остановлен'} •{' '}
                         {monitoring.link_configured ? 'ссылка задана' : 'ссылка не задана'}
                       </span>
+                      <span>
+                        {monitoring.subscription_ends_at
+                          ? `Подписка до: ${formatDate(monitoring.subscription_ends_at)}${
+                              monitoring.subscription_is_trial ? ' (пробный)' : ''
+                            }`
+                          : 'Подписка не активна'}
+                      </span>
                     </span>
 
                     <span className="subscription-chevron">
@@ -932,6 +944,18 @@ export default function App() {
               {selectedMonitoring && (
                 <>
                   <h1 className="screen-title">{detailDraft.title || selectedMonitoring.title || 'Подписка'}</h1>
+
+                  <p className="hint-text">
+                    {selectedMonitoring.subscription_ends_at
+                      ? `Подписка действует до: ${formatDate(selectedMonitoring.subscription_ends_at)}${
+                          selectedMonitoring.subscription_is_trial ? ' (пробный)' : ''
+                        }${
+                          selectedMonitoring.subscription_plan_name
+                            ? ` · ${selectedMonitoring.subscription_plan_name}`
+                            : ''
+                        }`
+                      : 'Подписка не активна'}
+                  </p>
 
                   <h2 className="section-title">Настройки подписки</h2>
                   <input
@@ -1280,6 +1304,13 @@ export default function App() {
                             <span className="profile-bot-main">
                               <strong>{bot?.name || 'Бот'}</strong>
                               <span>{botShortName(bot)}</span>
+                              <span>
+                                {bot?.subscription_ends_at
+                                  ? `Подписка до: ${formatDate(bot.subscription_ends_at)}${
+                                      bot?.subscription_is_trial ? ' (пробный)' : ''
+                                    }`
+                                  : 'Подписка не активна'}
+                              </span>
                             </span>
                             <span className="profile-bot-open">{botLink ? 'Открыть' : 'Недоступно'}</span>
                             <span className="profile-bot-chevron">

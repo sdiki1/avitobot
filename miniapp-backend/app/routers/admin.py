@@ -30,6 +30,7 @@ from app.schemas import (
 from app.services.auth import require_admin_token
 from app.services.helpers import (
     activate_user_subscription,
+    cleanup_expired_proxies,
     ensure_subscription_monitoring_slots,
     get_referral_reward_percent,
     get_miniapp_content_settings,
@@ -555,6 +556,7 @@ def delete_plan(plan_id: int, db: Session = Depends(get_db)) -> dict:
 
 @router.get("/proxies", response_model=list[ProxyResponse])
 def list_proxies(db: Session = Depends(get_db)) -> list[ProxyConfig]:
+    cleanup_expired_proxies(db)
     return list(
         db.scalars(
             select(ProxyConfig)

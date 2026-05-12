@@ -92,6 +92,14 @@ STATIC_MESSAGE_PHOTOS = {
         PROJECT_ROOT / "msg_link_change.jpg",
         PROJECT_ROOT / "msg_link_change.png",
     ],
+    "link_error": [
+        APP_ROOT / "msg_link_error.jpeg",
+        APP_ROOT / "msg_link_error.jpg",
+        APP_ROOT / "msg_link_error.png",
+        PROJECT_ROOT / "msg_link_error.jpeg",
+        PROJECT_ROOT / "msg_link_error.jpg",
+        PROJECT_ROOT / "msg_link_error.png",
+    ],
     "monitoring_start": [
         APP_ROOT / "msg_monitoring_start.jpeg",
         PROJECT_ROOT / "msg_monitoring_start.jpeg",
@@ -224,6 +232,19 @@ def _extract_referral_code(start_arg: str) -> str | None:
 def _looks_like_url(value: str) -> bool:
     lowered = value.lower()
     return lowered.startswith("http://") or lowered.startswith("https://")
+
+
+_AVITO_HOST_RE = re.compile(r"^https?://(www\.)?avito\.(ru|com)(/|$|\?|#)", re.IGNORECASE)
+
+
+def _is_avito_url(value: str) -> bool:
+    return bool(_AVITO_HOST_RE.match(value.strip()))
+
+
+_LINK_ERROR_TEXT = (
+    "Нужна ссылка на Avito: формат https://avito.ru/..., https://www.avito.ru/..., "
+    "https://avito.com/... или https://www.avito.com/..."
+)
 
 
 def _fit_photo_caption(value: str, max_len: int = 1024) -> str:
@@ -898,7 +919,11 @@ def build_router(bot_id: int, backend: BackendAPI, *, is_primary: bool = False) 
         await state.set_state(LinkChangeState.waiting_url)
         await _answer_with_static_photo(
             message,
-            "Отправьте новую ссылку на мониторинг (начинается с http:// или https://).",
+            (
+                "Отправьте новую ссылку на мониторинг с Avito: формат "
+                "https://avito.ru/..., https://www.avito.ru/..., "
+                "https://avito.com/... или https://www.avito.com/..."
+            ),
             photo_key="link_change",
             reply_markup=monitoring_actions_keyboard(message.from_user.id, include_cancel=True),
         )
@@ -1010,11 +1035,11 @@ def build_router(bot_id: int, backend: BackendAPI, *, is_primary: bool = False) 
             await _prompt_change_link(message, state)
             return
         url = parts[1].strip()
-        if not _looks_like_url(url):
+        if not _looks_like_url(url) or not _is_avito_url(url):
             await _answer_with_static_photo(
                 message,
-                "Ссылка должна начинаться с http:// или https://",
-                photo_key="link_change",
+                _LINK_ERROR_TEXT,
+                photo_key="link_error",
                 reply_markup=monitoring_actions_keyboard(message.from_user.id),
             )
             return
@@ -1033,11 +1058,11 @@ def build_router(bot_id: int, backend: BackendAPI, *, is_primary: bool = False) 
                 reply_markup=monitoring_actions_keyboard(message.from_user.id),
             )
             return
-        if not _looks_like_url(value):
+        if not _looks_like_url(value) or not _is_avito_url(value):
             await _answer_with_static_photo(
                 message,
-                "Нужна ссылка формата https://... Повторите ввод или нажмите «Отмена изменения».",
-                photo_key="link_change",
+                f"{_LINK_ERROR_TEXT}\nПовторите ввод или нажмите «Отмена изменения».",
+                photo_key="link_error",
                 reply_markup=monitoring_actions_keyboard(message.from_user.id, include_cancel=True),
             )
             return

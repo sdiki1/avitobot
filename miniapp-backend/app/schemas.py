@@ -151,6 +151,9 @@ class MonitoringResponse(BaseModel):
     notify_price_drop: bool = True
     last_checked_at: datetime | None = None
     bot: BotReference | None = None
+    subscription_ends_at: datetime | None = None
+    subscription_plan_name: str | None = None
+    subscription_is_trial: bool = False
 
 
 class MonitoringItemResponse(BaseModel):

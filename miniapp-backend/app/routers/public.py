@@ -33,6 +33,7 @@ from app.services.helpers import (
     ensure_subscription_monitoring_slots,
     ensure_user_referral_code,
     get_active_links_limit,
+    get_monitoring_subscription_map,
     get_trial_days,
     get_miniapp_content_settings,
     get_active_subscription_query,
@@ -78,7 +79,8 @@ def _to_bot_ref(bot: TelegramBot | None) -> BotReference | None:
     )
 
 
-def _monitoring_to_schema(mon: Monitoring) -> MonitoringResponse:
+def _monitoring_to_schema(mon: Monitoring, sub_info: dict | None = None) -> MonitoringResponse:
+    sub_info = sub_info or {}
     return MonitoringResponse(
         id=mon.id,
         url=normalize_monitoring_url(mon.url),
@@ -96,6 +98,9 @@ def _monitoring_to_schema(mon: Monitoring) -> MonitoringResponse:
         notify_price_drop=mon.notify_price_drop,
         last_checked_at=mon.last_checked_at,
         bot=_to_bot_ref(mon.bot),
+        subscription_ends_at=sub_info.get("subscription_ends_at"),
+        subscription_plan_name=sub_info.get("subscription_plan_name"),
+        subscription_is_trial=bool(sub_info.get("subscription_is_trial") or False),
     )
 
 
@@ -663,17 +668,22 @@ def profile(
         for sub in subscriptions
     ]
 
+    sub_map = get_monitoring_subscription_map(db, user.id)
     bots: dict[int, dict] = {}
     for mon in user_monitorings:
         if not mon.bot:
             continue
         if mon.bot.id in bots:
             continue
+        slot = sub_map.get(int(mon.id)) or {}
         bots[mon.bot.id] = {
             "id": mon.bot.id,
             "name": mon.bot.name,
             "bot_username": mon.bot.bot_username,
             "bot_link": _build_bot_link(mon.bot.bot_username),
+            "subscription_ends_at": slot.get("subscription_ends_at"),
+            "subscription_plan_name": slot.get("subscription_plan_name"),
+            "subscription_is_trial": bool(slot.get("subscription_is_trial") or False),
         }
     payload["assigned_bots"] = list(bots.values())
     return payload
@@ -702,7 +712,8 @@ def list_monitorings(
         )
         .order_by(Monitoring.id.desc())
     ).all()
-    return [_monitoring_to_schema(m) for m in monitorings]
+    sub_map = get_monitoring_subscription_map(db, user.id)
+    return [_monitoring_to_schema(m, sub_map.get(int(m.id))) for m in monitorings]
 
 
 @router.post("/monitorings", response_model=MonitoringResponse)
@@ -748,7 +759,8 @@ def create_monitoring(
     db.add(monitoring)
     db.commit()
     db.refresh(monitoring)
-    return _monitoring_to_schema(monitoring)
+    sub_map = get_monitoring_subscription_map(db, user.id)
+    return _monitoring_to_schema(monitoring, sub_map.get(int(monitoring.id)))
 
 
 @router.patch("/monitorings/{monitoring_id}", response_model=MonitoringResponse)
@@ -875,7 +887,8 @@ def update_monitoring(
             photo_key="monitoring_stop",
         )
 
-    return _monitoring_to_schema(monitoring)
+    sub_map = get_monitoring_subscription_map(db, auth_user.id)
+    return _monitoring_to_schema(monitoring, sub_map.get(int(monitoring.id)))
 
 
 @router.post("/monitorings/purchase", response_model=MonitoringResponse)
@@ -916,7 +929,8 @@ def purchase_monitoring(
     db.add(monitoring)
     db.commit()
     db.refresh(monitoring)
-    return _monitoring_to_schema(monitoring)
+    sub_map = get_monitoring_subscription_map(db, user.id)
+    return _monitoring_to_schema(monitoring, sub_map.get(int(monitoring.id)))
 
 
 @router.post("/subscriptions/purchase", response_model=PurchaseSubscriptionResponse)
