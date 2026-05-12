@@ -61,7 +61,6 @@
           <th>Прокси</th>
           <th>Источник</th>
           <th>Срок</th>
-          <th>Статус</th>
           <th>Действия</th>
         </tr>
       </thead>
@@ -70,19 +69,13 @@
         <%
           const isEnvProxy = String(proxy.name || '').startsWith('env-proxy-');
           const expiresOn = proxy.expires_on ? String(proxy.expires_on).slice(0, 10) : '';
-          const cooldownUntil = proxy.cooldown_until ? new Date(proxy.cooldown_until) : null;
-          const now = new Date();
-          const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-          const isExpired = Boolean(expiresOn && expiresOn < todayIso);
-          const isCoolingDown = Boolean(cooldownUntil && cooldownUntil > now);
         %>
         <tr>
           <td><%= proxy.id %></td>
           <td>
             <strong><%= proxy.name %></strong><br />
             <span class="muted"><%= proxy.proxy_url %></span><br />
-            <span class="muted"><%= proxy.change_ip_url || '-' %></span><br />
-            <span class="muted">Ошибок: <%= proxy.fail_count || 0 %></span>
+            <span class="muted"><%= proxy.change_ip_url || '-' %></span>
           </td>
           <td><%= isEnvProxy ? '.env' : 'admin' %></td>
           <td>
@@ -93,7 +86,6 @@
               <span class="muted">—</span>
             <% } %>
           </td>
-          <td>—</td>
           <td>
             <form class="form-grid two" action="<%= adminBase %>/proxies/<%= proxy.id %>/update" method="post">
               <label class="field">
