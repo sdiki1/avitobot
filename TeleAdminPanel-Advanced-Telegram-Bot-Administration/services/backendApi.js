@@ -55,3 +55,9 @@ exports.getPayments = () => request('/payments');
 exports.createPayment = (payload) => request('/payments', { method: 'POST', body: JSON.stringify(payload) });
 exports.activateSubscription = (payload) =>
   request('/subscriptions/activate', { method: 'POST', body: JSON.stringify(payload) });
+exports.grantBonusDaysAll = (payload) =>
+  request('/subscriptions/grant-days-all', { method: 'POST', body: JSON.stringify(payload) });
+exports.grantBonusDaysUser = (payload) =>
+  request('/subscriptions/grant-days-user', { method: 'POST', body: JSON.stringify(payload) });
+exports.broadcast = (payload) =>
+  request('/broadcast', { method: 'POST', body: JSON.stringify(payload) });

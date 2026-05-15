@@ -235,6 +235,34 @@ class ActivateSubscriptionRequest(BaseModel):
     plan_id: int
 
 
+class GrantBonusDaysAllRequest(BaseModel):
+    days: int = Field(gt=0, le=365)
+
+
+class GrantBonusDaysUserRequest(BaseModel):
+    telegram_id: int
+    days: int = Field(gt=0, le=365)
+
+
+class GrantBonusDaysResponse(BaseModel):
+    ok: bool
+    days: int
+    updated_subscriptions: int
+    affected_users: int
+
+
+class BroadcastRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=4000)
+    photo_url: str | None = Field(default=None, max_length=2048)
+
+
+class BroadcastResponse(BaseModel):
+    ok: bool
+    total: int
+    sent: int
+    failed: int
+
+
 class PurchaseSubscriptionRequest(BaseModel):
     telegram_id: int
     plan_id: int

@@ -577,6 +577,73 @@ def _send_telegram_photo(
         return False
 
 
+def _send_telegram_photo_url(
+    bot_token: str,
+    chat_id: int,
+    caption: str,
+    photo_url: str,
+    *,
+    disable_web_page_preview: bool = True,
+) -> bool:
+    payload_data: dict[str, Any] = {
+        "chat_id": chat_id,
+        "photo": photo_url,
+        "caption": caption,
+        "disable_web_page_preview": disable_web_page_preview,
+    }
+    payload = json.dumps(payload_data).encode("utf-8")
+    req = urllib_request.Request(
+        f"https://api.telegram.org/bot{bot_token}/sendPhoto",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib_request.urlopen(req, timeout=15) as response:
+            return 200 <= response.status < 300
+    except Exception as exc:
+        logger.warning("Failed to send telegram photo url='%s': %s", photo_url, exc)
+        return False
+
+
+def broadcast_to_all_users(
+    db: Session,
+    text: str,
+    photo_url: str | None = None,
+) -> dict[str, int]:
+    primary_bot = db.scalar(
+        select(TelegramBot)
+        .where(and_(TelegramBot.is_primary.is_(True), TelegramBot.is_active.is_(True)))
+        .order_by(TelegramBot.id.asc())
+    )
+    if not primary_bot:
+        primary_bot = db.scalar(
+            select(TelegramBot).where(TelegramBot.is_active.is_(True)).order_by(TelegramBot.id.asc())
+        )
+    if not primary_bot:
+        return {"total": 0, "sent": 0, "failed": 0}
+
+    user_ids = [
+        int(uid)
+        for uid in db.scalars(select(User.telegram_id).order_by(User.id.asc())).all()
+        if uid is not None
+    ]
+
+    sent = 0
+    failed = 0
+    for chat_id in user_ids:
+        ok = False
+        if photo_url:
+            ok = _send_telegram_photo_url(primary_bot.bot_token, chat_id, text, photo_url)
+        else:
+            ok = _send_telegram_message(primary_bot.bot_token, chat_id, text)
+        if ok:
+            sent += 1
+        else:
+            failed += 1
+    return {"total": len(user_ids), "sent": sent, "failed": failed}
+
+
 def get_admin_notify_chat_ids(db: Session) -> list[int]:
     chat_ids: set[int] = set()
 

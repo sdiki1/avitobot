@@ -74,6 +74,49 @@
 </section>
 
 <section class="card">
+  <h2>Рассылка всем пользователям</h2>
+  <p class="muted">Отправит сообщение всем пользователям из базы через основной (primary) бот. Если указан URL фото — отправит фото с подписью.</p>
+  <form class="stack" action="<%= adminBase %>/broadcast" method="post" onsubmit="return confirm('Отправить рассылку всем пользователям?');">
+    <label class="field">
+      <span>Текст (до 4000 символов)</span>
+      <textarea name="text" rows="5" maxlength="4000" placeholder="Текст рассылки..." required></textarea>
+    </label>
+    <label class="field">
+      <span>URL фото (опционально)</span>
+      <input name="photo_url" placeholder="https://example.com/photo.jpg" />
+    </label>
+    <button type="submit">Отправить рассылку</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Бонусные дни</h2>
+  <p class="muted">Продлевает срок всех активных подписок пользователя(ей) на указанное количество дней.</p>
+
+  <h3>Начислить всем</h3>
+  <form class="form-grid two" action="<%= adminBase %>/subscriptions/grant-days-all" method="post" onsubmit="return confirm('Начислить дни всем пользователям с активной подпиской?');">
+    <label class="field">
+      <span>Дней</span>
+      <input name="days" type="number" min="1" max="365" placeholder="3" required />
+    </label>
+    <button type="submit">Начислить всем</button>
+  </form>
+
+  <h3>Начислить одному пользователю</h3>
+  <form class="form-grid" action="<%= adminBase %>/subscriptions/grant-days-user" method="post">
+    <label class="field">
+      <span>Telegram ID</span>
+      <input name="telegram_id" type="number" placeholder="123456789" required />
+    </label>
+    <label class="field">
+      <span>Дней</span>
+      <input name="days" type="number" min="1" max="365" placeholder="3" required />
+    </label>
+    <button type="submit">Начислить</button>
+  </form>
+</section>
+
+<section class="card">
   <h2>Пробный период</h2>
   <form class="form-grid two" action="<%= adminBase %>/trial-settings/update" method="post">
     <input

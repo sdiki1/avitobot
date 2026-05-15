@@ -430,6 +430,60 @@ router.post('/subscriptions/activate', async (req, res) => {
   }
 });
 
+router.post('/subscriptions/grant-days-all', async (req, res) => {
+  try {
+    const days = toInt(req.body.days);
+    if (!days || days <= 0) throw new Error('Укажите количество дней больше 0');
+    const result = await api.grantBonusDaysAll({ days });
+    res.redirect(
+      withAdminBase(
+        `/?success=${encodeURIComponent(
+          `Начислено ${result.days} дн. всем: пользователей ${result.affected_users}, подписок ${result.updated_subscriptions}`,
+        )}`,
+      ),
+    );
+  } catch (error) {
+    res.redirect(withAdminBase(`/?success=${encodeURIComponent(`Ошибка: ${error.message}`)}`));
+  }
+});
+
+router.post('/broadcast', async (req, res) => {
+  try {
+    const text = String(req.body.text || '').trim();
+    if (!text) throw new Error('Введите текст рассылки');
+    const photoUrl = String(req.body.photo_url || '').trim() || null;
+    const result = await api.broadcast({ text, photo_url: photoUrl });
+    res.redirect(
+      withAdminBase(
+        `/?success=${encodeURIComponent(
+          `Рассылка: всего ${result.total}, доставлено ${result.sent}, ошибок ${result.failed}`,
+        )}`,
+      ),
+    );
+  } catch (error) {
+    res.redirect(withAdminBase(`/?success=${encodeURIComponent(`Ошибка: ${error.message}`)}`));
+  }
+});
+
+router.post('/subscriptions/grant-days-user', async (req, res) => {
+  try {
+    const days = toInt(req.body.days);
+    const telegramId = toInt(req.body.telegram_id);
+    if (!telegramId) throw new Error('Укажите Telegram ID');
+    if (!days || days <= 0) throw new Error('Укажите количество дней больше 0');
+    const result = await api.grantBonusDaysUser({ telegram_id: telegramId, days });
+    res.redirect(
+      withAdminBase(
+        `/?success=${encodeURIComponent(
+          `Начислено ${result.days} дн. пользователю ${telegramId}: подписок ${result.updated_subscriptions}`,
+        )}`,
+      ),
+    );
+  } catch (error) {
+    res.redirect(withAdminBase(`/?success=${encodeURIComponent(`Ошибка: ${error.message}`)}`));
+  }
+});
+
 router.post('/trial-settings/update', async (req, res) => {
   try {
     await api.updateTrialSettings({

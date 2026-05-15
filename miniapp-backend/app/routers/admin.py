@@ -8,6 +8,11 @@ from app.schemas import (
     ActivateSubscriptionRequest,
     AdminUserCreate,
     AdminUserUpdate,
+    BroadcastRequest,
+    BroadcastResponse,
+    GrantBonusDaysAllRequest,
+    GrantBonusDaysResponse,
+    GrantBonusDaysUserRequest,
     MiniAppContentResponse,
     MiniAppContentUpdate,
     MonitoringAdminUpdate,
@@ -30,6 +35,8 @@ from app.schemas import (
 from app.services.auth import require_admin_token
 from app.services.helpers import (
     activate_user_subscription,
+    add_days,
+    broadcast_to_all_users,
     cleanup_expired_proxies,
     ensure_subscription_monitoring_slots,
     get_referral_reward_percent,
@@ -40,6 +47,8 @@ from app.services.helpers import (
     now_utc,
     normalize_monitoring_url,
     proxy_capacity_status,
+    send_admin_event_message,
+    send_subscription_assigned_bot_message,
     set_referral_reward_percent,
     set_miniapp_content_settings,
     set_trial_days,
@@ -667,3 +676,101 @@ def activate_subscription(payload: ActivateSubscriptionRequest, db: Session = De
         "ends_at": new_sub.ends_at,
         "slots_created": slots_created,
     }
+
+
+def _extend_active_subscriptions(db: Session, user_id: int, days: int) -> int:
+    subs = db.scalars(
+        select(UserSubscription).where(
+            and_(
+                UserSubscription.user_id == user_id,
+                UserSubscription.ends_at > now_utc(),
+            )
+        )
+    ).all()
+    for sub in subs:
+        sub.ends_at = add_days(sub.ends_at, days)
+    return len(subs)
+
+
+@router.post("/subscriptions/grant-days-all", response_model=GrantBonusDaysResponse)
+def grant_bonus_days_all(payload: GrantBonusDaysAllRequest, db: Session = Depends(get_db)) -> GrantBonusDaysResponse:
+    days = int(payload.days)
+    user_ids = [
+        int(uid)
+        for uid in db.scalars(
+            select(func.distinct(UserSubscription.user_id)).where(UserSubscription.ends_at > now_utc())
+        ).all()
+        if uid is not None
+    ]
+    total_updated = 0
+    for user_id in user_ids:
+        total_updated += _extend_active_subscriptions(db, user_id, days)
+    if total_updated:
+        db.commit()
+    send_admin_event_message(
+        db,
+        (
+            "🎁 Начислены бонусные дни всем\n"
+            f"Срок продления: {days} дн.\n"
+            f"Пользователей: {len(user_ids)}\n"
+            f"Подписок обновлено: {total_updated}"
+        ),
+    )
+    return GrantBonusDaysResponse(
+        ok=True,
+        days=days,
+        updated_subscriptions=total_updated,
+        affected_users=len(user_ids),
+    )
+
+
+@router.post("/subscriptions/grant-days-user", response_model=GrantBonusDaysResponse)
+def grant_bonus_days_user(payload: GrantBonusDaysUserRequest, db: Session = Depends(get_db)) -> GrantBonusDaysResponse:
+    days = int(payload.days)
+    user = db.scalar(select(User).where(User.telegram_id == int(payload.telegram_id)))
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Пользователь не найден")
+    updated = _extend_active_subscriptions(db, user.id, days)
+    if updated == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="У пользователя нет активных подписок — активируйте подписку через раздел «Быстрая активация»",
+        )
+    db.commit()
+    send_subscription_assigned_bot_message(db, user)
+    send_admin_event_message(
+        db,
+        (
+            "🎁 Начислены бонусные дни пользователю\n"
+            f"Telegram ID: {user.telegram_id}\n"
+            f"Срок продления: {days} дн.\n"
+            f"Подписок обновлено: {updated}"
+        ),
+    )
+    return GrantBonusDaysResponse(
+        ok=True,
+        days=days,
+        updated_subscriptions=updated,
+        affected_users=1,
+    )
+
+
+@router.post("/broadcast", response_model=BroadcastResponse)
+def broadcast(payload: BroadcastRequest, db: Session = Depends(get_db)) -> BroadcastResponse:
+    photo_url = (payload.photo_url or "").strip() or None
+    result = broadcast_to_all_users(db, payload.text.strip(), photo_url)
+    send_admin_event_message(
+        db,
+        (
+            "📣 Рассылка завершена\n"
+            f"Всего: {result['total']}\n"
+            f"Доставлено: {result['sent']}\n"
+            f"Ошибок: {result['failed']}"
+        ),
+    )
+    return BroadcastResponse(
+        ok=True,
+        total=result["total"],
+        sent=result["sent"],
+        failed=result["failed"],
+    )
