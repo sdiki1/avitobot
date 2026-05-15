@@ -47,8 +47,6 @@ const DEFAULT_PARAM_FLAGS = {
 const DEFAULT_MINIAPP_CONTENT = {
   support_title: 'Поддержка',
   support_url: 'https://t.me/your_support',
-  faq_title: 'Частые вопросы',
-  faq_url: 'https://t.me/your_faq',
   news_title: 'Новостной канал',
   news_url: 'https://t.me/your_news',
   terms_title: 'Пользовательское соглашение',
@@ -60,7 +58,6 @@ const DEFAULT_MINIAPP_CONTENT = {
   profile_title: 'Профиль',
   info_links: [
     { key: 'support', title: 'Поддержка', url: 'https://t.me/your_support' },
-    { key: 'faq', title: 'Частые вопросы', url: 'https://t.me/your_faq' },
     { key: 'news', title: 'Новостной канал', url: 'https://t.me/your_news' },
     { key: 'terms', title: 'Пользовательское соглашение', url: 'https://t.me/your_terms' },
     { key: 'privacy', title: 'Политика конфиденциальности', url: 'https://t.me/your_privacy' },

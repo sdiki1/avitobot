@@ -29,8 +29,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 MINIAPP_CONTENT_DEFAULTS = {
     "miniapp_info_support_title": "Поддержка",
     "miniapp_info_support_url": "https://t.me/your_support",
-    "miniapp_info_faq_title": "Частые вопросы",
-    "miniapp_info_faq_url": "https://t.me/your_faq",
     "miniapp_info_news_title": "Новостной канал",
     "miniapp_info_news_url": "https://t.me/your_news",
     "miniapp_info_terms_title": "Пользовательское соглашение",

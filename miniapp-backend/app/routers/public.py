@@ -108,8 +108,6 @@ def _miniapp_content_response(values: dict[str, str]) -> MiniAppContentResponse:
     return MiniAppContentResponse(
         support_title=values["miniapp_info_support_title"],
         support_url=values["miniapp_info_support_url"],
-        faq_title=values["miniapp_info_faq_title"],
-        faq_url=values["miniapp_info_faq_url"],
         news_title=values["miniapp_info_news_title"],
         news_url=values["miniapp_info_news_url"],
         terms_title=values["miniapp_info_terms_title"],
@@ -121,7 +119,6 @@ def _miniapp_content_response(values: dict[str, str]) -> MiniAppContentResponse:
         profile_title=values["miniapp_profile_title"],
         info_links=[
             {"key": "support", "title": values["miniapp_info_support_title"], "url": values["miniapp_info_support_url"]},
-            {"key": "faq", "title": values["miniapp_info_faq_title"], "url": values["miniapp_info_faq_url"]},
             {"key": "news", "title": values["miniapp_info_news_title"], "url": values["miniapp_info_news_url"]},
             {"key": "terms", "title": values["miniapp_info_terms_title"], "url": values["miniapp_info_terms_url"]},
             {"key": "privacy", "title": values["miniapp_info_privacy_title"], "url": values["miniapp_info_privacy_url"]},

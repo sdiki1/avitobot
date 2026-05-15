@@ -6,8 +6,6 @@ const ADMIN_BASE_PATH = process.env.ADMIN_BASE_PATH || "/admin";
 const DEFAULT_MINIAPP_CONTENT = {
   support_title: 'Поддержка',
   support_url: 'https://t.me/your_support',
-  faq_title: 'Частые вопросы',
-  faq_url: 'https://t.me/your_faq',
   news_title: 'Новостной канал',
   news_url: 'https://t.me/your_news',
   terms_title: 'Пользовательское соглашение',
@@ -511,8 +509,6 @@ router.post('/miniapp-content/update', async (req, res) => {
     await api.updateMiniappContent({
       support_title: req.body.support_title,
       support_url: req.body.support_url,
-      faq_title: req.body.faq_title,
-      faq_url: req.body.faq_url,
       news_title: req.body.news_title,
       news_url: req.body.news_url,
       terms_title: req.body.terms_title,

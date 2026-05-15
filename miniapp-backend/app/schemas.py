@@ -326,8 +326,6 @@ class MiniAppInfoLink(BaseModel):
 class MiniAppContentResponse(BaseModel):
     support_title: str
     support_url: str
-    faq_title: str
-    faq_url: str
     news_title: str
     news_url: str
     terms_title: str
@@ -343,8 +341,6 @@ class MiniAppContentResponse(BaseModel):
 class MiniAppContentUpdate(BaseModel):
     support_title: str = Field(min_length=1, max_length=120)
     support_url: str = Field(min_length=1, max_length=512)
-    faq_title: str = Field(min_length=1, max_length=120)
-    faq_url: str = Field(min_length=1, max_length=512)
     news_title: str = Field(min_length=1, max_length=120)
     news_url: str = Field(min_length=1, max_length=512)
     terms_title: str = Field(min_length=1, max_length=120)
