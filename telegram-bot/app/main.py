@@ -198,16 +198,7 @@ def _extract_error(payload: dict[str, Any]) -> str:
     return "Неизвестная ошибка"
 
 
-def _format_monitoring_status(monitoring: dict[str, Any]) -> str:
-    state = "включен" if monitoring.get("is_active") else "остановлен"
-    link_configured = "да" if monitoring.get("link_configured") else "нет"
-    title = monitoring.get("title") or f"#{monitoring.get('monitoring_id')}"
-    return (
-        f"Мониторинг: {title}\n"
-        f"Статус: {state}\n"
-        f"Ссылка задана: {link_configured}\n"
-        f"Текущая ссылка: {monitoring.get('url')}"
-    )
+MOSCOW_TZ = timezone(timedelta(hours=3))
 
 
 def _format_datetime_ru(value: str | None) -> str:
@@ -216,9 +207,30 @@ def _format_datetime_ru(value: str | None) -> str:
     try:
         normalized = value.replace("Z", "+00:00")
         dt = datetime.fromisoformat(normalized)
-        return dt.strftime("%d.%m.%Y %H:%M")
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(MOSCOW_TZ).strftime("%d.%m.%Y %H:%M")
     except Exception:
         return value
+
+
+def _format_monitoring_status(monitoring: dict[str, Any]) -> str:
+    state = "включен" if monitoring.get("is_active") else "остановлен"
+    link_configured = "да" if monitoring.get("link_configured") else "нет"
+    title = monitoring.get("title") or f"#{monitoring.get('monitoring_id')}"
+    lines = [
+        f"Мониторинг: {title}",
+        f"Статус: {state}",
+        f"Ссылка задана: {link_configured}",
+        f"Текущая ссылка: {monitoring.get('url')}",
+    ]
+    ends_at = monitoring.get("subscription_ends_at")
+    if ends_at:
+        if monitoring.get("subscription_is_trial"):
+            lines.append(f"Пробный период до: {_format_datetime_ru(ends_at)}")
+        else:
+            lines.append(f"Подписка до: {_format_datetime_ru(ends_at)}")
+    return "\n".join(lines)
 
 
 def _extract_start_arg(text: str | None) -> str:

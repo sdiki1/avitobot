@@ -25,6 +25,7 @@ from app.services.helpers import (
     format_new_item_message,
     format_price_change_message,
     get_active_subscription_query,
+    get_monitoring_subscription_map,
     maintain_proxy_pool,
     normalize_monitoring_url,
     normalize_proxy_url,
@@ -36,14 +37,22 @@ from app.services.notification_queue import enqueue_notification, purge_monitori
 router = APIRouter(prefix="/internal", tags=["internal"], dependencies=[Depends(require_internal_token)])
 
 
-def _to_bot_lookup_schema(monitoring: Monitoring) -> InternalBotLookupResponse:
+def _to_bot_lookup_schema(monitoring: Monitoring, sub_info: dict | None = None) -> InternalBotLookupResponse:
+    sub_info = sub_info or {}
     return InternalBotLookupResponse(
         monitoring_id=monitoring.id,
         title=monitoring.title,
         url=normalize_monitoring_url(monitoring.url),
         is_active=monitoring.is_active,
         link_configured=monitoring.link_configured,
+        subscription_ends_at=sub_info.get("subscription_ends_at"),
+        subscription_is_trial=bool(sub_info.get("subscription_is_trial") or False),
     )
+
+
+def _bot_lookup_with_subscription(db: Session, monitoring: Monitoring) -> InternalBotLookupResponse:
+    sub_map = get_monitoring_subscription_map(db, monitoring.user_id)
+    return _to_bot_lookup_schema(monitoring, sub_map.get(int(monitoring.id)))
 
 
 def _resolve_user_monitoring(db: Session, telegram_id: int, bot_id: int) -> Monitoring:
@@ -441,7 +450,7 @@ def bot_current_monitoring(
     db: Session = Depends(get_db),
 ) -> InternalBotLookupResponse:
     monitoring = _resolve_user_monitoring(db, telegram_id=telegram_id, bot_id=bot_id)
-    return _to_bot_lookup_schema(monitoring)
+    return _bot_lookup_with_subscription(db, monitoring)
 
 
 @router.get("/monitorings/{monitoring_id}/state")
@@ -487,7 +496,7 @@ def bot_start_monitoring(payload: InternalBotCommandRequest, db: Session = Depen
     monitoring.notify_since_at = now_utc()
     db.commit()
     db.refresh(monitoring)
-    return _to_bot_lookup_schema(monitoring)
+    return _bot_lookup_with_subscription(db, monitoring)
 
 
 @router.post("/bot-monitoring/stop", response_model=InternalBotLookupResponse)
@@ -497,7 +506,7 @@ def bot_stop_monitoring(payload: InternalBotCommandRequest, db: Session = Depend
     monitoring.is_active = False
     db.commit()
     db.refresh(monitoring)
-    return _to_bot_lookup_schema(monitoring)
+    return _bot_lookup_with_subscription(db, monitoring)
 
 
 @router.post("/bot-monitoring/change-link", response_model=InternalBotLookupResponse)
@@ -510,7 +519,7 @@ def bot_change_link(payload: InternalBotCommandRequest, db: Session = Depends(ge
     monitoring.link_configured = True
     db.commit()
     db.refresh(monitoring)
-    return _to_bot_lookup_schema(monitoring)
+    return _bot_lookup_with_subscription(db, monitoring)
 
 
 @router.get("/notifications/pending", response_model=list[InternalNotificationResponse])

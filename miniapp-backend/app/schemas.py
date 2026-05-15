@@ -399,6 +399,8 @@ class InternalBotLookupResponse(BaseModel):
     url: str
     is_active: bool
     link_configured: bool
+    subscription_ends_at: datetime | None = None
+    subscription_is_trial: bool = False
 
 
 class InternalBotSyncRequest(BaseModel):

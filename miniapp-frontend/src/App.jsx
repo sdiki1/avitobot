@@ -83,14 +83,16 @@ function getPaymentIdFromQuery() {
   return Math.trunc(parsed)
 }
 
+const MOSCOW_TZ = 'Europe/Moscow'
+
 function formatDateTime(value) {
   if (!value) return '—'
-  return new Date(value).toLocaleString('ru-RU')
+  return new Date(value).toLocaleString('ru-RU', { timeZone: MOSCOW_TZ })
 }
 
 function formatDate(value) {
   if (!value) return '—'
-  return new Date(value).toLocaleDateString('ru-RU')
+  return new Date(value).toLocaleDateString('ru-RU', { timeZone: MOSCOW_TZ })
 }
 
 function buildSubscriptionBotLink(bot) {
@@ -902,9 +904,9 @@ export default function App() {
                       </span>
                       <span>
                         {monitoring.subscription_ends_at
-                          ? `Подписка до: ${formatDate(monitoring.subscription_ends_at)}${
-                              monitoring.subscription_is_trial ? ' (пробный)' : ''
-                            }`
+                          ? monitoring.subscription_is_trial
+                            ? `Пробный период до: ${formatDateTime(monitoring.subscription_ends_at)}`
+                            : `Подписка до: ${formatDateTime(monitoring.subscription_ends_at)}`
                           : 'Подписка не активна'}
                       </span>
                     </span>
@@ -944,13 +946,13 @@ export default function App() {
 
                   <p className="hint-text">
                     {selectedMonitoring.subscription_ends_at
-                      ? `Подписка действует до: ${formatDate(selectedMonitoring.subscription_ends_at)}${
-                          selectedMonitoring.subscription_is_trial ? ' (пробный)' : ''
-                        }${
-                          selectedMonitoring.subscription_plan_name
-                            ? ` · ${selectedMonitoring.subscription_plan_name}`
-                            : ''
-                        }`
+                      ? selectedMonitoring.subscription_is_trial
+                        ? `Пробный период до: ${formatDateTime(selectedMonitoring.subscription_ends_at)}`
+                        : `Подписка действует до: ${formatDateTime(selectedMonitoring.subscription_ends_at)}${
+                            selectedMonitoring.subscription_plan_name
+                              ? ` · ${selectedMonitoring.subscription_plan_name}`
+                              : ''
+                          }`
                       : 'Подписка не активна'}
                   </p>
 
@@ -1303,9 +1305,9 @@ export default function App() {
                               <span>{botShortName(bot)}</span>
                               <span>
                                 {bot?.subscription_ends_at
-                                  ? `Подписка до: ${formatDate(bot.subscription_ends_at)}${
-                                      bot?.subscription_is_trial ? ' (пробный)' : ''
-                                    }`
+                                  ? bot.subscription_is_trial
+                                    ? `Пробный период до: ${formatDateTime(bot.subscription_ends_at)}`
+                                    : `Подписка до: ${formatDateTime(bot.subscription_ends_at)}`
                                   : 'Подписка не активна'}
                               </span>
                             </span>
