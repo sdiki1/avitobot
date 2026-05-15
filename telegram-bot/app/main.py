@@ -104,6 +104,14 @@ STATIC_MESSAGE_PHOTOS = {
         APP_ROOT / "msg_monitoring_start.jpeg",
         PROJECT_ROOT / "msg_monitoring_start.jpeg",
     ],
+    "status": [
+        APP_ROOT / "msg_status.png",
+        APP_ROOT / "msg_status.jpeg",
+        APP_ROOT / "msg_status.jpg",
+        PROJECT_ROOT / "msg_status.png",
+        PROJECT_ROOT / "msg_status.jpeg",
+        PROJECT_ROOT / "msg_status.jpg",
+    ],
     "monitoring_stop": [
         APP_ROOT / "msg_monitoring_stop.jpeg",
         APP_ROOT / "msg_monitoring_stop.png",
@@ -822,8 +830,10 @@ def build_router(bot_id: int, backend: BackendAPI, *, is_primary: bool = False) 
     async def _show_status(message: Message) -> None:
         status_code, payload = await backend.current_monitoring(bot_id=bot_id, telegram_id=message.from_user.id)
         if status_code == 200:
-            await message.answer(
+            await _answer_with_static_photo(
+                message,
                 _format_monitoring_status(payload),
+                photo_key="status",
                 reply_markup=monitoring_actions_keyboard(message.from_user.id),
             )
             return
