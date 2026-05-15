@@ -275,6 +275,8 @@ export default function App() {
   const [selectedType, setSelectedType] = useState(TYPE_OPTIONS[0].id)
   const [selectedPlanId, setSelectedPlanId] = useState(null)
   const [useReferralBalance, setUseReferralBalance] = useState(false)
+  const [agreedToTerms, setAgreedToTerms] = useState(false)
+  const [agreedToPrivacy, setAgreedToPrivacy] = useState(false)
   const [buyDraft, setBuyDraft] = useState({ title: '', url: '' })
   const [buyTargetMonitoringId, setBuyTargetMonitoringId] = useState(null)
   const [allSubscriptionsExpanded, setAllSubscriptionsExpanded] = useState(true)
@@ -499,6 +501,8 @@ export default function App() {
       setBuyDraft({ title: '', url: '' })
       setBuyTargetMonitoringId(null)
     }
+    setAgreedToTerms(false)
+    setAgreedToPrivacy(false)
     setSubscriptionView(SUBSCRIPTION_VIEW.buy)
   }
 
@@ -1165,11 +1169,69 @@ export default function App() {
                 </div>
               )}
 
+              <div className="buy-summary">
+                <button
+                  type="button"
+                  className="check-row"
+                  onClick={() => setAgreedToTerms((prev) => !prev)}
+                >
+                  <span className={`check-box ${agreedToTerms ? 'checked' : ''}`} />
+                  <span>
+                    Согласен с{' '}
+                    <a
+                      href={miniappContent?.terms_url || '#'}
+                      target="_blank"
+                      rel="noreferrer"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        if (miniappContent?.terms_url) {
+                          event.preventDefault()
+                          openExternal(miniappContent.terms_url)
+                        }
+                      }}
+                    >
+                      пользовательским соглашением
+                    </a>
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  className="check-row"
+                  onClick={() => setAgreedToPrivacy((prev) => !prev)}
+                >
+                  <span className={`check-box ${agreedToPrivacy ? 'checked' : ''}`} />
+                  <span>
+                    Согласен с{' '}
+                    <a
+                      href={miniappContent?.privacy_url || '#'}
+                      target="_blank"
+                      rel="noreferrer"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        if (miniappContent?.privacy_url) {
+                          event.preventDefault()
+                          openExternal(miniappContent.privacy_url)
+                        }
+                      }}
+                    >
+                      политикой конфиденциальности
+                    </a>
+                  </span>
+                </button>
+              </div>
+
               <button
                 type="button"
                 className="primary-btn"
                 onClick={onPurchase}
-                disabled={!selectedPlan || purchaseBusy || purchaseStatusBusy}
+                disabled={
+                  !selectedPlan ||
+                  purchaseBusy ||
+                  purchaseStatusBusy ||
+                  !agreedToTerms ||
+                  !agreedToPrivacy
+                }
               >
                 {purchaseBusy ? 'Создание платежа...' : 'Оплатить через ЮKassa (СБП)'}
               </button>
