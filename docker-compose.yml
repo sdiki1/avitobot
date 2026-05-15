@@ -56,6 +56,7 @@ services:
       - ./msg_link_error.jpeg:/app/msg_link_error.jpeg:ro
       - ./msg_monitoring_start.jpeg:/app/msg_monitoring_start.jpeg:ro
       - ./msg_monitoring_stop.png:/app/msg_monitoring_stop.png:ro
+      - ./msg_status.png:/app/msg_status.png:ro
 
   avito-parser:
     build:
@@ -95,6 +96,7 @@ services:
       - ./msg_link_error.jpeg:/app/msg_link_error.jpeg:ro
       - ./msg_monitoring_start.jpeg:/app/msg_monitoring_start.jpeg:ro
       - ./msg_monitoring_stop.png:/app/msg_monitoring_stop.png:ro
+      - ./msg_status.png:/app/msg_status.png:ro
     depends_on:
       miniapp-backend:
         condition: service_started
