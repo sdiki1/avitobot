@@ -30,7 +30,11 @@
     </label>
     <label class="field">
       <span>Прокси</span>
-      <input name="proxy_url" placeholder="http://user:pass@host:port" required />
+      <input name="proxy_url" placeholder="socks5://user:pass@host:port" />
+    </label>
+    <label class="field">
+      <span>Альтернативная ссылка</span>
+      <input name="alternative_proxy_url" placeholder="ip:port:login:pass" />
     </label>
     <label class="field">
       <span>URL смены IP</span>
@@ -95,6 +99,10 @@
               <label class="field">
                 <span>Прокси</span>
                 <input name="proxy_url" value="<%= proxy.proxy_url %>" required />
+              </label>
+              <label class="field">
+                <span>Альтернативная ссылка</span>
+                <input name="alternative_proxy_url" placeholder="ip:port:login:pass" />
               </label>
               <label class="field">
                 <span>URL смены IP</span>

@@ -29,6 +29,11 @@ exports.createPlan = (payload) => request('/plans', { method: 'POST', body: JSON
 exports.updatePlan = (id, payload) => request(`/plans/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
 exports.deletePlan = (id) => request(`/plans/${id}`, { method: 'DELETE' });
 
+exports.getPromoCodes = () => request('/promo-codes');
+exports.createPromoCode = (payload) => request('/promo-codes', { method: 'POST', body: JSON.stringify(payload) });
+exports.updatePromoCode = (id, payload) => request(`/promo-codes/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+exports.deletePromoCode = (id) => request(`/promo-codes/${id}`, { method: 'DELETE' });
+
 exports.getProxies = () => request('/proxies');
 exports.createProxy = (payload) => request('/proxies', { method: 'POST', body: JSON.stringify(payload) });
 exports.updateProxy = (id, payload) => request(`/proxies/${id}`, { method: 'PUT', body: JSON.stringify(payload) });

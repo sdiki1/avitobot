@@ -97,6 +97,7 @@ services:
       - ./msg_monitoring_start.jpeg:/app/msg_monitoring_start.jpeg:ro
       - ./msg_monitoring_stop.png:/app/msg_monitoring_stop.png:ro
       - ./msg_status.png:/app/msg_status.png:ro
+      - ./instruct.jpeg:/app/instruct.jpeg:ro
     depends_on:
       miniapp-backend:
         condition: service_started

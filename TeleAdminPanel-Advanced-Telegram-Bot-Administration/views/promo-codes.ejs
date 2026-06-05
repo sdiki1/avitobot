@@ -1,0 +1,83 @@
+<%- include('partials/header', { title: 'Промокоды' }) %>
+
+<section class="card">
+  <h1>Промокоды</h1>
+  <p class="muted">Создавайте скидки для покупки подписки: процент от тарифа или фиксированная сумма в рублях.</p>
+
+  <% if (success) { %>
+    <div class="alert info"><%= success %></div>
+  <% } %>
+  <% if (error) { %>
+    <div class="alert error"><%= error %></div>
+  <% } %>
+
+  <h2>Добавить промокод</h2>
+  <form class="form-grid" action="<%= adminBase %>/promo-codes" method="post">
+    <input name="code" placeholder="PROMO10" required />
+    <select name="discount_type" required>
+      <option value="percent"><%= discountLabels.percent %></option>
+      <option value="rub"><%= discountLabels.rub %></option>
+    </select>
+    <input name="discount_value" type="number" min="1" placeholder="Размер скидки" required />
+    <label>
+      <input type="checkbox" name="is_active" checked /> Активен
+    </label>
+    <button type="submit">Добавить</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Список промокодов</h2>
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Промокод</th>
+          <th>Скидка</th>
+          <th>Использований</th>
+          <th>Статус</th>
+          <th>Управление</th>
+        </tr>
+      </thead>
+      <tbody>
+      <% promoCodes.forEach((promo) => { %>
+        <%
+          const type = promo.discount_type === 'rub' ? 'rub' : 'percent';
+          const discountLabel = type === 'rub' ? `${promo.discount_value} ₽` : `${promo.discount_value}%`;
+        %>
+        <tr>
+          <td><strong><%= promo.id %></strong></td>
+          <td><strong><%= promo.code %></strong></td>
+          <td><%= discountLabel %></td>
+          <td><%= promo.usage_count || 0 %></td>
+          <td>
+            <span class="badge <%= promo.is_active ? 'active' : 'disabled' %>">
+              <%= promo.is_active ? 'active' : 'disabled' %>
+            </span>
+          </td>
+          <td>
+            <form class="form-grid two" action="<%= adminBase %>/promo-codes/<%= promo.id %>/update" method="post">
+              <input name="code" value="<%= promo.code %>" required />
+              <select name="discount_type" required>
+                <option value="percent" <%= type === 'percent' ? 'selected' : '' %>><%= discountLabels.percent %></option>
+                <option value="rub" <%= type === 'rub' ? 'selected' : '' %>><%= discountLabels.rub %></option>
+              </select>
+              <input name="discount_value" type="number" min="1" value="<%= promo.discount_value %>" required />
+              <label>
+                <input type="checkbox" name="is_active" <%= promo.is_active ? 'checked' : '' %> /> Активен
+              </label>
+              <button type="submit">Сохранить</button>
+            </form>
+            <form action="<%= adminBase %>/promo-codes/<%= promo.id %>/delete" method="post">
+              <button class="danger" type="submit">Удалить</button>
+            </form>
+          </td>
+        </tr>
+      <% }) %>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<%- include('partials/footer') %>

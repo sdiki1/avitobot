@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
+  checkPromoCode,
   getAuthSession,
   getMiniappContent,
   getMonitorings,
@@ -230,6 +231,10 @@ function normalizeDraftUrl(value) {
   return String(value || '').trim()
 }
 
+function normalizePromoCode(value) {
+  return String(value || '').trim().toUpperCase().replace(/\s+/g, '')
+}
+
 function hasMonitoringSettingsChanges(monitoring, draft, flags) {
   if (!monitoring) return false
 
@@ -275,6 +280,9 @@ export default function App() {
   const [selectedType, setSelectedType] = useState(TYPE_OPTIONS[0].id)
   const [selectedPlanId, setSelectedPlanId] = useState(null)
   const [useReferralBalance, setUseReferralBalance] = useState(false)
+  const [promoCode, setPromoCode] = useState('')
+  const [promoPreview, setPromoPreview] = useState(null)
+  const [promoBusy, setPromoBusy] = useState(false)
   const [agreedToTerms, setAgreedToTerms] = useState(false)
   const [agreedToPrivacy, setAgreedToPrivacy] = useState(false)
   const [buyDraft, setBuyDraft] = useState({ title: '', url: '' })
@@ -343,10 +351,20 @@ export default function App() {
     return getPlanDurationLabel(selectedPlan)
   }, [selectedPlan])
 
+  const normalizedPromoCode = normalizePromoCode(promoCode)
+  const activePromoPreview = useMemo(() => {
+    if (!promoPreview || !selectedPlan) return null
+    if (normalizePromoCode(promoPreview.code) !== normalizedPromoCode) return null
+    if (Number(promoPreview.plan_id || 0) !== Number(selectedPlan.id || 0)) return null
+    return promoPreview
+  }, [normalizedPromoCode, promoPreview, selectedPlan])
+
   const referralBalance = profile?.user?.referral_balance_rub ?? 0
   const basePrice = Number(selectedPlan?.price_rub || 0)
-  const totalBeforeReferral = Math.max(0, basePrice)
-  const totalPrice = Math.max(0, totalBeforeReferral - (useReferralBalance ? referralBalance : 0))
+  const promoDiscount = Math.min(basePrice, Number(activePromoPreview?.discount_rub || 0))
+  const priceAfterPromo = Math.max(0, basePrice - promoDiscount)
+  const referralApplied = useReferralBalance ? Math.min(referralBalance, priceAfterPromo) : 0
+  const totalPrice = Math.max(0, priceAfterPromo - referralApplied)
 
   const loadData = async (tgId) => {
     const [profileData, plansData, monitoringsData, contentData] = await Promise.all([
@@ -501,6 +519,8 @@ export default function App() {
       setBuyDraft({ title: '', url: '' })
       setBuyTargetMonitoringId(null)
     }
+    setPromoCode('')
+    setPromoPreview(null)
     setAgreedToTerms(false)
     setAgreedToPrivacy(false)
     setSubscriptionView(SUBSCRIPTION_VIEW.buy)
@@ -526,8 +546,38 @@ export default function App() {
     window.Telegram?.WebApp?.close?.()
   }, [buyTargetMonitoringId, subscriptionView, tab])
 
+  const applyPromoCode = async () => {
+    if (!telegramId || !selectedPlan || promoBusy) return
+    if (!normalizedPromoCode) {
+      setPromoPreview(null)
+      setStatusMessage('Введите промокод')
+      return
+    }
+    try {
+      setPromoBusy(true)
+      const result = await checkPromoCode({
+        telegram_id: Number(telegramId),
+        plan_id: Number(selectedPlan.id),
+        promo_code: normalizedPromoCode,
+      })
+      setPromoCode(result.code || normalizedPromoCode)
+      setPromoPreview({ ...result, plan_id: Number(selectedPlan.id) })
+      setStatusMessage(`Промокод применен. Скидка: ${Number(result.discount_rub || 0)} ₽`)
+    } catch (error) {
+      setPromoPreview(null)
+      const detail = error?.response?.data?.detail || error?.message || 'Промокод не применен'
+      setStatusMessage(`Ошибка: ${detail}`)
+    } finally {
+      setPromoBusy(false)
+    }
+  }
+
   const onPurchase = async () => {
     if (!telegramId || !selectedPlan || purchaseBusy) return
+    if (normalizedPromoCode && !activePromoPreview) {
+      setStatusMessage('Нажмите «Применить промокод», чтобы пересчитать сумму')
+      return
+    }
     try {
       setPurchaseBusy(true)
       const result = await purchaseSubscription({
@@ -535,6 +585,7 @@ export default function App() {
         plan_id: Number(selectedPlan.id),
         subscription_type: selectedType,
         use_referral_balance: useReferralBalance,
+        promo_code: activePromoPreview ? normalizedPromoCode : null,
         monitoring_id: buyTargetMonitoringId ? Number(buyTargetMonitoringId) : null,
         monitoring_title: buyDraft.title || null,
         monitoring_url: buyDraft.url || null,
@@ -1124,12 +1175,40 @@ export default function App() {
 
               <p className="hint-text">Укажите поисковую URL-ссылку на список объявлений из адресной строки браузера.</p>
 
+              <h2 className="section-title">Промокод</h2>
+              <input
+                type="text"
+                className="dark-input"
+                placeholder="Введите промокод"
+                value={promoCode}
+                onChange={(event) => {
+                  setPromoCode(event.target.value)
+                  setPromoPreview(null)
+                }}
+              />
+              <button
+                type="button"
+                className="secondary-btn"
+                onClick={applyPromoCode}
+                disabled={promoBusy || !normalizedPromoCode || !selectedPlan}
+              >
+                {promoBusy ? 'Проверяем...' : 'Применить промокод'}
+              </button>
+              {activePromoPreview && (
+                <p className="hint-text hint-success">
+                  Промокод {activePromoPreview.code}: скидка {promoDiscount} ₽
+                </p>
+              )}
+
               <div className="buy-summary">
                 <div className="summary-balance">Тариф: {selectedPlan?.name || '—'}</div>
                 <div className="summary-balance">Срок: {selectedPlanDurationLabel} ({selectedPlan?.duration_days ?? 0} дней)</div>
                 <div className="summary-balance">Цена тарифа: {basePrice}₽</div>
+                {activePromoPreview && <div className="summary-balance">Скидка промокода: −{promoDiscount}₽</div>}
+                {activePromoPreview && <div className="summary-balance">После промокода: {priceAfterPromo}₽</div>}
                 <div className="summary-total">Итог: {totalPrice}₽</div>
                 <div className="summary-balance">Реф. баланс: {referralBalance}₽</div>
+                {useReferralBalance && <div className="summary-balance">Списать с реф. баланса: {referralApplied}₽</div>}
                 <button
                   type="button"
                   className="check-row balance-row"
@@ -1233,7 +1312,7 @@ export default function App() {
                   !agreedToPrivacy
                 }
               >
-                {purchaseBusy ? 'Создание платежа...' : 'Оплатить через ЮKassa (СБП)'}
+                {purchaseBusy ? 'Создание платежа...' : totalPrice <= 0 ? 'Активировать подписку' : 'Оплатить через ЮKassa (СБП)'}
               </button>
             </section>
           )}

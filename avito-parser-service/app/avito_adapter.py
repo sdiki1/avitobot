@@ -53,7 +53,7 @@ class AvitoAdapter:
             port = parts[1]
             username = parts[2]
             password = ":".join(parts[3:])
-            return f"http://{quote(username, safe='')}:{quote(password, safe='')}@{host}:{port}"
+            return f"socks5://{quote(username, safe='')}:{quote(password, safe='')}@{host}:{port}"
 
         # host:port without auth
         if len(parts) == 2 and parts[1].isdigit():

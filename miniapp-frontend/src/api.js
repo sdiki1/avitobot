@@ -68,6 +68,11 @@ export async function purchaseSubscription(payload) {
   return data
 }
 
+export async function checkPromoCode(payload) {
+  const { data } = await client.post('/promo-codes/check', payload)
+  return data
+}
+
 export async function getSubscriptionPurchaseStatus(telegramId, paymentId) {
   const { data } = await client.get(`/subscriptions/purchase/${paymentId}/status`, {
     params: { telegram_id: telegramId },

@@ -156,6 +156,29 @@ def init_db() -> None:
             "WHERE duration_label IS NULL OR NULLIF(TRIM(duration_label), '') IS NULL"
         )
 
+        conn.exec_driver_sql(
+            "CREATE TABLE IF NOT EXISTS promo_codes ("
+            "id SERIAL PRIMARY KEY, "
+            "code VARCHAR(64) NOT NULL UNIQUE, "
+            "discount_type VARCHAR(16) NOT NULL, "
+            "discount_value INTEGER NOT NULL, "
+            "is_active BOOLEAN DEFAULT TRUE, "
+            "usage_count INTEGER DEFAULT 0, "
+            "created_at TIMESTAMP WITH TIME ZONE DEFAULT now(), "
+            "updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()"
+            ")"
+        )
+        conn.exec_driver_sql("ALTER TABLE promo_codes ADD COLUMN IF NOT EXISTS code VARCHAR(64)")
+        conn.exec_driver_sql("ALTER TABLE promo_codes ADD COLUMN IF NOT EXISTS discount_type VARCHAR(16)")
+        conn.exec_driver_sql("ALTER TABLE promo_codes ADD COLUMN IF NOT EXISTS discount_value INTEGER")
+        conn.exec_driver_sql("ALTER TABLE promo_codes ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE")
+        conn.exec_driver_sql("ALTER TABLE promo_codes ADD COLUMN IF NOT EXISTS usage_count INTEGER DEFAULT 0")
+        conn.exec_driver_sql("ALTER TABLE promo_codes ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT now()")
+        conn.exec_driver_sql("ALTER TABLE promo_codes ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()")
+        conn.exec_driver_sql("CREATE UNIQUE INDEX IF NOT EXISTS ix_promo_codes_code ON promo_codes (code)")
+        conn.exec_driver_sql("UPDATE promo_codes SET is_active = TRUE WHERE is_active IS NULL")
+        conn.exec_driver_sql("UPDATE promo_codes SET usage_count = 0 WHERE usage_count IS NULL")
+
         conn.exec_driver_sql("ALTER TABLE proxies ADD COLUMN IF NOT EXISTS cooldown_until TIMESTAMP WITH TIME ZONE")
         conn.exec_driver_sql("ALTER TABLE proxies ADD COLUMN IF NOT EXISTS last_blocked_at TIMESTAMP WITH TIME ZONE")
         conn.exec_driver_sql("ALTER TABLE proxies ADD COLUMN IF NOT EXISTS last_block_status INTEGER")

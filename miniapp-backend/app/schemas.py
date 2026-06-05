@@ -21,6 +21,7 @@ class UserResponse(BaseModel):
     full_name: str | None = None
     referral_code: str | None = None
     referral_balance_rub: int = 0
+    is_new: bool = False
 
     class Config:
         from_attributes = True
@@ -97,6 +98,34 @@ class TariffPlanUpdate(BaseModel):
 
 class TariffPlanResponse(TariffPlanBase):
     id: int
+
+    class Config:
+        from_attributes = True
+
+
+class PromoCodeBase(BaseModel):
+    code: str = Field(min_length=3, max_length=64)
+    discount_type: str = Field(min_length=3, max_length=16)
+    discount_value: int = Field(gt=0)
+    is_active: bool = True
+
+
+class PromoCodeCreate(PromoCodeBase):
+    pass
+
+
+class PromoCodeUpdate(BaseModel):
+    code: str | None = Field(default=None, min_length=3, max_length=64)
+    discount_type: str | None = Field(default=None, min_length=3, max_length=16)
+    discount_value: int | None = Field(default=None, gt=0)
+    is_active: bool | None = None
+
+
+class PromoCodeResponse(PromoCodeBase):
+    id: int
+    usage_count: int = 0
+    created_at: datetime
+    updated_at: datetime
 
     class Config:
         from_attributes = True
@@ -269,6 +298,7 @@ class PurchaseSubscriptionRequest(BaseModel):
     duration_days: int | None = Field(default=None, gt=0)
     subscription_type: str = "standard"
     use_referral_balance: bool = False
+    promo_code: str | None = Field(default=None, max_length=64)
     monitoring_id: int | None = None
     monitoring_title: str | None = None
     monitoring_url: str | None = None
@@ -288,7 +318,25 @@ class PurchaseSubscriptionResponse(BaseModel):
     amount_rub: int = 0
     referral_used_rub: int = 0
     total_price_rub: int = 0
+    promo_code: str | None = None
+    promo_discount_rub: int = 0
     message: str | None = None
+
+
+class PromoCodeCheckRequest(BaseModel):
+    telegram_id: int
+    plan_id: int
+    promo_code: str = Field(min_length=1, max_length=64)
+
+
+class PromoCodeCheckResponse(BaseModel):
+    ok: bool
+    code: str
+    discount_type: str
+    discount_value: int
+    base_price_rub: int
+    discount_rub: int
+    price_after_discount_rub: int
 
 
 class OnboardingTrialRequest(BaseModel):
@@ -427,6 +475,7 @@ class InternalNotificationsSentBatchRequest(BaseModel):
 class MonitoringAdminUpdate(BaseModel):
     title: str | None = None
     url: str | None = None
+    bot_id: int | None = None
     is_active: bool | None = None
     include_photo: bool | None = None
     include_description: bool | None = None

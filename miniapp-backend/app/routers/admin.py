@@ -3,7 +3,7 @@ from sqlalchemy import and_, desc, func, select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import Monitoring, Payment, ProxyConfig, TariffPlan, TelegramBot, User, UserSubscription
+from app.models import Monitoring, Payment, PromoCode, ProxyConfig, TariffPlan, TelegramBot, User, UserSubscription
 from app.schemas import (
     ActivateSubscriptionRequest,
     AdminUserCreate,
@@ -18,6 +18,9 @@ from app.schemas import (
     MonitoringAdminUpdate,
     PaymentCreate,
     PaymentResponse,
+    PromoCodeCreate,
+    PromoCodeResponse,
+    PromoCodeUpdate,
     ProxyCreate,
     ProxyResponse,
     ProxyUpdate,
@@ -46,12 +49,15 @@ from app.services.helpers import (
     maintain_proxy_pool,
     now_utc,
     normalize_monitoring_url,
+    normalize_promo_code,
+    normalize_proxy_url,
     proxy_capacity_status,
     send_admin_event_message,
     send_subscription_assigned_bot_message,
     set_referral_reward_percent,
     set_miniapp_content_settings,
     set_trial_days,
+    validate_promo_code_value,
 )
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin_token)])
@@ -126,6 +132,27 @@ def _normalize_duration_label(value: str | None, duration_days: int) -> str:
     if label:
         return label
     return f"{int(duration_days)} дней"
+
+
+def _normalize_promo_payload(data: dict) -> dict:
+    normalized = dict(data)
+    if "code" in normalized:
+        code = normalize_promo_code(normalized.get("code"))
+        if not code:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Укажите промокод")
+        normalized["code"] = code
+
+    discount_type = normalized.get("discount_type")
+    discount_value = normalized.get("discount_value")
+    if discount_type is not None or discount_value is not None:
+        try:
+            normalized_type, normalized_value = validate_promo_code_value(discount_type, discount_value)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        normalized["discount_type"] = normalized_type
+        normalized["discount_value"] = normalized_value
+
+    return normalized
 
 
 def _current_month_bounds() -> tuple:
@@ -372,9 +399,40 @@ def update_monitoring(monitoring_id: int, payload: MonitoringAdminUpdate, db: Se
         monitoring.url = cleaned_url
         monitoring.link_configured = bool(cleaned_url)
 
+    if payload.bot_id is not None:
+        next_bot_id = int(payload.bot_id)
+        if next_bot_id <= 0:
+            monitoring.bot_id = None
+            monitoring.is_active = False
+        elif next_bot_id != monitoring.bot_id:
+            next_bot = db.get(TelegramBot, next_bot_id)
+            if not next_bot:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bot not found")
+            if not next_bot.is_active:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Бот неактивен")
+            if next_bot.is_primary:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Основной бот нельзя назначать на мониторинг")
+            existing_monitoring = db.scalar(
+                select(Monitoring).where(
+                    and_(
+                        Monitoring.user_id == monitoring.user_id,
+                        Monitoring.bot_id == next_bot_id,
+                        Monitoring.id != monitoring.id,
+                    )
+                )
+            )
+            if existing_monitoring:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Этот бот уже назначен другому мониторингу пользователя",
+                )
+            monitoring.bot_id = next_bot_id
+
     if payload.is_active is not None:
         if payload.is_active and not monitoring.link_configured:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Сначала задайте ссылку")
+        if payload.is_active and not monitoring.bot_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Сначала назначьте бота")
         monitoring.is_active = payload.is_active
 
     if payload.include_photo is not None:
@@ -558,6 +616,62 @@ def delete_plan(plan_id: int, db: Session = Depends(get_db)) -> dict:
     return {"ok": True}
 
 
+@router.get("/promo-codes", response_model=list[PromoCodeResponse])
+def list_promo_codes(db: Session = Depends(get_db)) -> list[PromoCode]:
+    return list(db.scalars(select(PromoCode).order_by(PromoCode.id.asc())))
+
+
+@router.post("/promo-codes", response_model=PromoCodeResponse)
+def create_promo_code(payload: PromoCodeCreate, db: Session = Depends(get_db)) -> PromoCode:
+    payload_data = _normalize_promo_payload(payload.model_dump())
+    existing = db.scalar(select(PromoCode).where(PromoCode.code == payload_data["code"]))
+    if existing:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Промокод уже существует")
+
+    promo_code = PromoCode(**payload_data)
+    db.add(promo_code)
+    db.commit()
+    db.refresh(promo_code)
+    return promo_code
+
+
+@router.put("/promo-codes/{promo_code_id}", response_model=PromoCodeResponse)
+def update_promo_code(promo_code_id: int, payload: PromoCodeUpdate, db: Session = Depends(get_db)) -> PromoCode:
+    promo_code = db.get(PromoCode, promo_code_id)
+    if not promo_code:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Промокод не найден")
+
+    update_data = payload.model_dump(exclude_unset=True)
+    if "discount_type" in update_data or "discount_value" in update_data:
+        update_data.setdefault("discount_type", promo_code.discount_type)
+        update_data.setdefault("discount_value", promo_code.discount_value)
+    update_data = _normalize_promo_payload(update_data)
+
+    if "code" in update_data:
+        existing = db.scalar(
+            select(PromoCode).where(and_(PromoCode.code == update_data["code"], PromoCode.id != promo_code_id))
+        )
+        if existing:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Промокод уже существует")
+
+    for key, value in update_data.items():
+        setattr(promo_code, key, value)
+
+    db.commit()
+    db.refresh(promo_code)
+    return promo_code
+
+
+@router.delete("/promo-codes/{promo_code_id}")
+def delete_promo_code(promo_code_id: int, db: Session = Depends(get_db)) -> dict:
+    promo_code = db.get(PromoCode, promo_code_id)
+    if not promo_code:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Промокод не найден")
+    db.delete(promo_code)
+    db.commit()
+    return {"ok": True}
+
+
 @router.get("/proxies", response_model=list[ProxyResponse])
 def list_proxies(db: Session = Depends(get_db)) -> list[ProxyConfig]:
     cleanup_expired_proxies(db)
@@ -575,10 +689,13 @@ def create_proxy(payload: ProxyCreate, db: Session = Depends(get_db)) -> ProxyCo
     normalized_name = (payload.name or "").strip()
     if normalized_name.startswith("env-proxy-"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Reserved proxy name prefix")
+    normalized_proxy_url = normalize_proxy_url(payload.proxy_url)
+    if not normalized_proxy_url:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Proxy URL is required")
 
     proxy = ProxyConfig(
         name=normalized_name,
-        proxy_url=payload.proxy_url,
+        proxy_url=normalized_proxy_url,
         change_ip_url=payload.change_ip_url,
         is_active=payload.is_active,
         expires_on=payload.expires_on,
@@ -603,6 +720,11 @@ def update_proxy(proxy_id: int, payload: ProxyUpdate, db: Session = Depends(get_
         if next_name.startswith("env-proxy-"):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Reserved proxy name prefix")
         payload_data["name"] = next_name
+    if "proxy_url" in payload_data:
+        normalized_proxy_url = normalize_proxy_url(payload_data.get("proxy_url"))
+        if not normalized_proxy_url:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Proxy URL is required")
+        payload_data["proxy_url"] = normalized_proxy_url
     old_expires_on = proxy.expires_on
     for key, value in payload_data.items():
         setattr(proxy, key, value)
@@ -662,6 +784,24 @@ def activate_subscription(payload: ActivateSubscriptionRequest, db: Session = De
         )
     ) or 0
     slots_created = ensure_subscription_monitoring_slots(db, user.id, current_total_slots + 1)
+    user_notified = send_subscription_assigned_bot_message(
+        db,
+        user,
+        plan=plan,
+        subscription=new_sub,
+        intro="🎁 Вам выдан тариф в подарок.",
+    )
+    send_admin_event_message(
+        db,
+        (
+            "🎁 Выдан тариф в подарок\n"
+            f"Telegram ID: {user.telegram_id}\n"
+            f"Тариф: {plan.name}\n"
+            f"До: {new_sub.ends_at.strftime('%d.%m.%Y %H:%M')}\n"
+            f"Создано слотов: {slots_created}\n"
+            f"Уведомление пользователю: {'отправлено' if user_notified else 'не отправлено'}"
+        ),
+    )
 
     return {
         "ok": True,
@@ -670,6 +810,7 @@ def activate_subscription(payload: ActivateSubscriptionRequest, db: Session = De
         "plan_id": plan.id,
         "ends_at": new_sub.ends_at,
         "slots_created": slots_created,
+        "user_notified": user_notified,
     }
 
 

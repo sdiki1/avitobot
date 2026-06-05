@@ -77,6 +77,24 @@ START_COMMAND_TEXT = (
     "«Открыть приложение»."
 )
 
+INSTRUCTION_TEXT = (
+    "<b>Инструкция</b>\n"
+    "1 . Ознакомьтесь с описанием бота и его условиями\n"
+    "2 . Перейти в Авито через бот или через браузер вашего телефона / компьютера\n"
+    "3 . Выбрать категорию\n"
+    "Пример номер 1 :\n"
+    "Электроника - смартфоны - iPhone - 17 pro max\n"
+    "Пример номер 2 :\n"
+    "Авто - легковые - марка - и интересующие вас параметры ( край / город / пробег / память и т.д)\n\n"
+    "ПАРАМЕТРЫ МОЖНО ВЫБРАТЬ ЛЮБЫЕ\n"
+    "АВТО | ТЕХНИКА | НЕДВИЖИМОСТЬ И ТАК ДАЛЕЕ !\n\n"
+    "4 . Скопировать ссылку в браузере и вставить ее в строку\n"
+    "5 . Так же вы можете установить ПрофСкан как веб приложение на главной экран вашего телефона для удобства\n"
+    "6 . Выбирайте более узкие направления\n"
+    "По параметрам телеграмм чтобы бот работал корректно присылает 30 объявлений в минуту .\n\n"
+    "Далее наша команда вам будет отправлять новые объявления которые были опубликованы ."
+)
+
 APP_ROOT = Path(__file__).resolve().parents[1]
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 STATIC_MESSAGE_PHOTOS = {
@@ -117,6 +135,14 @@ STATIC_MESSAGE_PHOTOS = {
         APP_ROOT / "msg_monitoring_stop.png",
         PROJECT_ROOT / "msg_monitoring_stop.jpeg",
         PROJECT_ROOT / "msg_monitoring_stop.png",
+    ],
+    "instruction": [
+        APP_ROOT / "instruct.jpeg",
+        APP_ROOT / "instruct.jpg",
+        APP_ROOT / "instruct.png",
+        PROJECT_ROOT / "instruct.jpeg",
+        PROJECT_ROOT / "instruct.jpg",
+        PROJECT_ROOT / "instruct.png",
     ],
 }
 _logged_missing_static_photo_keys: set[str] = set()
@@ -297,6 +323,7 @@ async def _answer_with_static_photo(
     photo_key: str | None = None,
     reply_markup: Any = None,
     disable_web_page_preview: bool = False,
+    parse_mode: str | None = None,
 ) -> None:
     photo_path = _resolve_static_photo_path(photo_key)
     if photo_path:
@@ -305,11 +332,13 @@ async def _answer_with_static_photo(
                 photo=FSInputFile(str(photo_path)),
                 caption=_fit_photo_caption(text),
                 reply_markup=reply_markup,
+                parse_mode=parse_mode,
             )
             if len((text or "").strip()) > 1024:
                 await message.answer(
                     text,
                     disable_web_page_preview=disable_web_page_preview,
+                    parse_mode=parse_mode,
                 )
             return
         except Exception as exc:
@@ -319,6 +348,16 @@ async def _answer_with_static_photo(
         text,
         reply_markup=reply_markup,
         disable_web_page_preview=disable_web_page_preview,
+        parse_mode=parse_mode,
+    )
+
+
+async def _send_instruction(message: Message) -> None:
+    await _answer_with_static_photo(
+        message,
+        INSTRUCTION_TEXT,
+        photo_key="instruction",
+        parse_mode="HTML",
     )
 
 
@@ -813,12 +852,14 @@ def build_router(bot_id: int, backend: BackendAPI, *, is_primary: bool = False) 
             tg_user = message.from_user
             start_arg = _extract_start_arg(message.text)
             referral_code = _extract_referral_code(start_arg)
-            await backend.auth_user(
+            auth = await backend.auth_user(
                 telegram_id=tg_user.id,
                 username=tg_user.username,
                 full_name=tg_user.full_name,
                 referral_code=referral_code,
             )
+            if auth.get("is_new"):
+                await _send_instruction(message)
             await message.answer(START_COMMAND_TEXT, reply_markup=miniapp_keyboard(tg_user.id))
 
         @router.message(Command("plans"))
@@ -947,12 +988,14 @@ def build_router(bot_id: int, backend: BackendAPI, *, is_primary: bool = False) 
         tg_user = message.from_user
         start_arg = _extract_start_arg(message.text)
         referral_code = _extract_referral_code(start_arg)
-        await backend.auth_user(
+        auth = await backend.auth_user(
             telegram_id=tg_user.id,
             username=tg_user.username,
             full_name=tg_user.full_name,
             referral_code=referral_code,
         )
+        if auth.get("is_new"):
+            await _send_instruction(message)
         status_code, payload = await backend.current_monitoring(bot_id=bot_id, telegram_id=tg_user.id)
 
         if start_arg == "subscription":

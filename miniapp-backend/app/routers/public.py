@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import get_db
-from app.models import Monitoring, MonitoringItem, Notification, Payment, TariffPlan, TelegramBot, User, UserSubscription
+from app.models import Monitoring, MonitoringItem, Notification, Payment, PromoCode, TariffPlan, TelegramBot, User, UserSubscription
 from app.schemas import (
     BotReference,
     MiniAppContentResponse,
@@ -20,6 +20,8 @@ from app.schemas import (
     NotificationResponse,
     OnboardingTrialRequest,
     OnboardingTrialResponse,
+    PromoCodeCheckRequest,
+    PromoCodeCheckResponse,
     PurchaseSubscriptionRequest,
     PurchaseSubscriptionResponse,
     TariffPlanResponse,
@@ -40,12 +42,14 @@ from app.services.helpers import (
     get_available_bot_for_user,
     get_or_create_user,
     normalize_monitoring_url,
+    normalize_promo_code,
     now_utc,
     parse_miniapp_auth_token,
     reward_referrer_for_payment,
     send_admin_event_message,
     send_monitoring_bot_message,
     send_subscription_assigned_bot_message,
+    calculate_promo_discount_rub,
 )
 from app.services.notification_queue import purge_monitoring_notifications
 from app.services.yookassa import YooKassaError, create_sbp_payment, get_payment as get_yookassa_payment, yookassa_is_configured
@@ -251,7 +255,13 @@ def _activate_onboarding_trial(db: Session, user: User) -> UserSubscription | No
     )
     current_total_slots = db.scalar(select(func.count(Monitoring.id)).where(Monitoring.user_id == user.id)) or 0
     ensure_subscription_monitoring_slots(db, user.id, current_total_slots + 1)
-    send_subscription_assigned_bot_message(db, user)
+    send_subscription_assigned_bot_message(
+        db,
+        user,
+        plan=plan,
+        subscription=subscription,
+        intro="Активирован пробный период.",
+    )
     send_admin_event_message(
         db,
         (
@@ -299,6 +309,29 @@ def _payment_payload(payment: Payment) -> dict:
     return dict(payload)
 
 
+def _resolve_promo_discount(db: Session, code: str | None, base_price_rub: int) -> tuple[PromoCode | None, int]:
+    normalized_code = normalize_promo_code(code)
+    if not normalized_code:
+        return None, 0
+
+    promo_code = db.scalar(select(PromoCode).where(PromoCode.code == normalized_code))
+    if not promo_code or not promo_code.is_active:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Промокод не найден или неактивен")
+
+    try:
+        discount_rub = calculate_promo_discount_rub(
+            promo_code.discount_type,
+            promo_code.discount_value,
+            base_price_rub,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    if discount_rub <= 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Промокод не дает скидку для этого тарифа")
+    return promo_code, discount_rub
+
+
 def _refund_referral_if_needed(user: User, payload: dict) -> dict:
     referral_used = max(0, _safe_int(payload.get("referral_used_rub"), 0))
     if referral_used <= 0:
@@ -318,6 +351,8 @@ def _build_purchase_response(
     amount_rub: int,
     referral_used_rub: int,
     total_price_rub: int,
+    promo_code: str | None = None,
+    promo_discount_rub: int | None = None,
     subscription: UserSubscription | None = None,
     payment: Payment | None = None,
     requires_payment: bool = False,
@@ -330,6 +365,12 @@ def _build_purchase_response(
     ends_at = subscription.ends_at if subscription else _parse_iso_datetime(payload.get("ends_at"))
     status_value = payment_status or str(payload.get("yookassa_status") or (payment.status if payment else "") or "").strip() or None
     confirmation_url = payment_url or (str(payload.get("confirmation_url") or "").strip() or None)
+    promo_code_value = promo_code if promo_code is not None else (str(payload.get("promo_code") or "").strip() or None)
+    promo_discount_value = (
+        max(0, int(promo_discount_rub))
+        if promo_discount_rub is not None
+        else max(0, _safe_int(payload.get("promo_discount_rub"), 0))
+    )
     return PurchaseSubscriptionResponse(
         ok=ok,
         requires_payment=requires_payment,
@@ -344,6 +385,8 @@ def _build_purchase_response(
         amount_rub=max(0, int(amount_rub)),
         referral_used_rub=max(0, int(referral_used_rub)),
         total_price_rub=max(0, int(total_price_rub)),
+        promo_code=promo_code_value,
+        promo_discount_rub=promo_discount_value,
         message=message,
     )
 
@@ -402,6 +445,8 @@ def _finalize_subscription_payment(
     amount_to_pay = max(0, _safe_int(payment.amount_rub, 0))
     referral_used = max(0, _safe_int(payload.get("referral_used_rub"), 0))
     total_price = max(amount_to_pay + referral_used, _safe_int(payload.get("total_price_rub"), amount_to_pay + referral_used))
+    promo_code_value = str(payload.get("promo_code") or "").strip()
+    promo_discount = max(0, _safe_int(payload.get("promo_discount_rub"), 0))
     current_total_slots = db.scalar(
         select(func.count(Monitoring.id)).where(
             and_(
@@ -427,6 +472,12 @@ def _finalize_subscription_payment(
     _apply_monitoring_purchase_payload(db, user, payload, target_total_slots)
 
     reward = reward_referrer_for_payment(db, user, amount_to_pay)
+    promo_code_id = _safe_int(payload.get("promo_code_id"), 0)
+    if promo_code_id > 0 and not bool(payload.get("promo_counted")):
+        promo_code = db.get(PromoCode, promo_code_id)
+        if promo_code:
+            promo_code.usage_count = int(promo_code.usage_count or 0) + 1
+            payload["promo_counted"] = True
     payment.status = "completed"
     payload["finalized"] = True
     payload["subscription_id"] = subscription.id
@@ -438,13 +489,21 @@ def _finalize_subscription_payment(
     payment.payload = payload
     db.commit()
 
-    send_subscription_assigned_bot_message(db, user)
+    send_subscription_assigned_bot_message(
+        db,
+        user,
+        plan=plan,
+        subscription=subscription,
+        intro="Подписка активирована.",
+    )
     send_admin_event_message(
         db,
         (
             "💳 Покупка подписки\n"
             f"Пользователь: {user.telegram_id}\n"
             f"Тариф: {plan.name}\n"
+            f"Промокод: {promo_code_value or '—'}\n"
+            f"Скидка промокода: {promo_discount} ₽\n"
             f"Сумма: {amount_to_pay} ₽\n"
             f"Списано с реф. баланса: {referral_used} ₽\n"
             f"Начислено рефереру: {reward} ₽"
@@ -478,6 +537,7 @@ def telegram_auth(payload: TelegramAuthRequest, db: Session = Depends(get_db)) -
                 f"Username: {username_line}"
             ),
         )
+    user.is_new = not existed_before
     return user
 
 
@@ -569,6 +629,33 @@ def list_plans(db: Session = Depends(get_db)) -> list[TariffPlan]:
 def miniapp_content(db: Session = Depends(get_db)) -> MiniAppContentResponse:
     values = get_miniapp_content_settings(db)
     return _miniapp_content_response(values)
+
+
+@router.post("/promo-codes/check", response_model=PromoCodeCheckResponse)
+def check_promo_code(
+    payload: PromoCodeCheckRequest,
+    auth_user: User = Depends(require_miniapp_user),
+    db: Session = Depends(get_db),
+) -> PromoCodeCheckResponse:
+    assert_telegram_id_match(auth_user, payload.telegram_id)
+    plan = db.get(TariffPlan, payload.plan_id)
+    if not plan or not plan.is_active:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="План не найден или неактивен")
+
+    base_price = max(0, int(plan.price_rub or 0))
+    promo_code, discount_rub = _resolve_promo_discount(db, payload.promo_code, base_price)
+    if not promo_code:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Укажите промокод")
+
+    return PromoCodeCheckResponse(
+        ok=True,
+        code=promo_code.code,
+        discount_type=promo_code.discount_type,
+        discount_value=promo_code.discount_value,
+        base_price_rub=base_price,
+        discount_rub=discount_rub,
+        price_after_discount_rub=max(0, base_price - discount_rub),
+    )
 
 
 @router.get("/profile")
@@ -967,7 +1054,8 @@ def purchase_subscription(
     target_total_slots = current_total_slots + slots_to_add
 
     base_price = max(0, int(plan.price_rub))
-    total_price = max(0, base_price)
+    promo_code, promo_discount = _resolve_promo_discount(db, payload.promo_code, base_price)
+    total_price = max(0, base_price - promo_discount)
 
     referral_used = 0
     if payload.use_referral_balance:
@@ -988,6 +1076,12 @@ def purchase_subscription(
         "create_new_monitoring": target_monitoring is None,
         "base_price_rub": base_price,
         "speed_surcharge_rub": 0,
+        "promo_code_id": promo_code.id if promo_code else None,
+        "promo_code": promo_code.code if promo_code else None,
+        "promo_discount_type": promo_code.discount_type if promo_code else None,
+        "promo_discount_value": promo_code.discount_value if promo_code else 0,
+        "promo_discount_rub": promo_discount,
+        "promo_counted": False,
         "total_price_rub": total_price,
         "referral_used_rub": referral_used,
         "referral_debited": referral_used > 0,

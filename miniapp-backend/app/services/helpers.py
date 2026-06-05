@@ -25,6 +25,9 @@ PROXY_CAPACITY_WARNING_SETTING_KEY = "proxy_capacity_last_warning_signature"
 DEFAULT_TRIAL_DAYS = 3
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+PROMO_DISCOUNT_PERCENT = "percent"
+PROMO_DISCOUNT_RUB = "rub"
+PROMO_DISCOUNT_TYPES = {PROMO_DISCOUNT_PERCENT, PROMO_DISCOUNT_RUB}
 
 MINIAPP_CONTENT_DEFAULTS = {
     "miniapp_info_support_title": "Поддержка",
@@ -106,7 +109,7 @@ def normalize_proxy_url(proxy_url: str | None) -> str:
         port = parts[1]
         username = parts[2]
         password = ":".join(parts[3:])
-        return f"http://{quote(username, safe='')}:{quote(password, safe='')}@{host}:{port}"
+        return f"socks5://{quote(username, safe='')}:{quote(password, safe='')}@{host}:{port}"
 
     if len(parts) == 2 and parts[1].isdigit():
         return f"http://{raw}"
@@ -115,6 +118,38 @@ def normalize_proxy_url(proxy_url: str | None) -> str:
         return f"http://{raw}"
 
     return raw
+
+
+def normalize_promo_code(code: str | None) -> str:
+    normalized = (code or "").strip().upper()
+    normalized = re.sub(r"\s+", "", normalized)
+    return normalized
+
+
+def validate_promo_code_value(discount_type: str | None, discount_value: int | None) -> tuple[str, int]:
+    normalized_type = (discount_type or "").strip().lower()
+    if normalized_type in {"процент", "проценты", "percent", "percentage", "%"}:
+        normalized_type = PROMO_DISCOUNT_PERCENT
+    elif normalized_type in {"руб", "рубли", "ruble", "rubles", "rub"}:
+        normalized_type = PROMO_DISCOUNT_RUB
+
+    if normalized_type not in PROMO_DISCOUNT_TYPES:
+        raise ValueError("Тип промокода должен быть percent или rub")
+
+    value = int(discount_value or 0)
+    if normalized_type == PROMO_DISCOUNT_PERCENT and not 1 <= value <= 100:
+        raise ValueError("Процент скидки должен быть от 1 до 100")
+    if normalized_type == PROMO_DISCOUNT_RUB and value <= 0:
+        raise ValueError("Скидка в рублях должна быть больше 0")
+    return normalized_type, value
+
+
+def calculate_promo_discount_rub(discount_type: str, discount_value: int, base_price_rub: int) -> int:
+    base_price = max(0, int(base_price_rub or 0))
+    normalized_type, value = validate_promo_code_value(discount_type, discount_value)
+    if normalized_type == PROMO_DISCOUNT_PERCENT:
+        return min(base_price, int(base_price * value / 100))
+    return min(base_price, value)
 
 
 def build_miniapp_auth_token(telegram_id: int) -> str:
@@ -861,7 +896,22 @@ def maintain_proxy_pool(db: Session) -> dict[str, int | bool]:
     }
 
 
-def send_subscription_assigned_bot_message(db: Session, user: User) -> bool:
+def _format_message_datetime(value: datetime | None) -> str | None:
+    if not value:
+        return None
+    normalized = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    moscow_time = normalized.astimezone(timezone(timedelta(hours=3)))
+    return moscow_time.strftime("%d.%m.%Y %H:%M МСК")
+
+
+def send_subscription_assigned_bot_message(
+    db: Session,
+    user: User,
+    *,
+    plan: TariffPlan | None = None,
+    subscription: UserSubscription | None = None,
+    intro: str | None = None,
+) -> bool:
     primary_bot = db.scalar(
         select(TelegramBot)
         .where(and_(TelegramBot.is_primary.is_(True), TelegramBot.is_active.is_(True)))
@@ -884,16 +934,48 @@ def send_subscription_assigned_bot_message(db: Session, user: User) -> bool:
         )
         .order_by(Monitoring.id.desc())
     )
-    if not assigned_bot:
+    if not assigned_bot and not plan and not subscription and not intro:
         return False
 
-    nickname = assigned_bot.bot_username or assigned_bot.name
-    nickname = nickname.lstrip("@")
-    text = (
-        f"Вам назначен бот: @{nickname}. "
-        "Перейдите в него и можете начинать работу с мониторингом"
-    )
-    return _send_telegram_message(primary_bot.bot_token, user.telegram_id, text)
+    lines: list[str] = []
+    if intro:
+        lines.append(intro.strip())
+    elif plan:
+        lines.append("Ваша подписка активирована.")
+
+    if plan:
+        lines.append(f"Тариф: {plan.name}")
+    if subscription and subscription.ends_at:
+        formatted_ends_at = _format_message_datetime(subscription.ends_at)
+        if formatted_ends_at:
+            lines.append(f"Действует до: {formatted_ends_at}")
+
+    reply_markup = None
+    if assigned_bot:
+        if assigned_bot.bot_username:
+            nickname = f"@{assigned_bot.bot_username.lstrip('@')}"
+        else:
+            nickname = assigned_bot.name or "бот"
+        lines.append(f"Назначенный бот: {nickname}")
+        bot_link = _build_bot_link(assigned_bot.bot_username)
+        if bot_link:
+            lines.append("Откройте назначенного бота и запустите его, чтобы получать уведомления.")
+            reply_markup = {
+                "inline_keyboard": [
+                    [
+                        {
+                            "text": "Открыть назначенного бота",
+                            "url": bot_link,
+                        }
+                    ]
+                ]
+            }
+        else:
+            lines.append("Откройте назначенного бота и запустите его, чтобы получать уведомления.")
+    else:
+        lines.append("Бот пока не назначен. Администратор должен добавить доступного бота.")
+
+    return _send_telegram_message(primary_bot.bot_token, user.telegram_id, "\n".join(lines), reply_markup=reply_markup)
 
 
 def _build_bot_link(bot_username: str | None) -> str | None:

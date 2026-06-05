@@ -57,6 +57,26 @@
             <form class="stack" action="<%= adminBase %>/monitorings/<%= m.id %>/update" method="post">
               <input name="title" value="<%= m.title || '' %>" placeholder="Название" />
               <input name="url" value="<%= m.url || '' %>" placeholder="https://www.avito.ru/..." />
+              <label class="field">
+                <span>Назначенный бот</span>
+                <select name="bot_id">
+                  <option value="0" <%= !m.bot_id ? 'selected' : '' %>>Не назначен</option>
+                  <% (bots || []).forEach((bot) => { %>
+                    <%
+                      const isSelected = Number(m.bot_id) === Number(bot.id);
+                      const isUnavailable = !bot.is_active || bot.is_primary;
+                      const marker = bot.is_primary ? ' · основной' : (!bot.is_active ? ' · неактивен' : '');
+                    %>
+                    <option
+                      value="<%= bot.id %>"
+                      <%= isSelected ? 'selected' : '' %>
+                      <%= isUnavailable && !isSelected ? 'disabled' : '' %>
+                    >
+                      #<%= bot.id %> <%= bot.name %><%= bot.bot_username ? ` (@${bot.bot_username})` : '' %><%= marker %>
+                    </option>
+                  <% }) %>
+                </select>
+              </label>
               <label>
                 <input name="is_active" type="checkbox" <%= m.is_active ? 'checked' : '' %> />
                 Активен
