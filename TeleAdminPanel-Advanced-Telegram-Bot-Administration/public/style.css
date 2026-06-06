@@ -185,6 +185,55 @@ button.danger {
   background: linear-gradient(135deg, #be123c, #e11d48);
 }
 
+a.button {
+  display: inline-block;
+  border: 0;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #0f766e, #0ea5a4);
+  color: #fff;
+  padding: 10px 12px;
+  cursor: pointer;
+  font-weight: 700;
+  text-decoration: none;
+  text-align: center;
+}
+
+a.button.secondary {
+  background: linear-gradient(135deg, #475569, #64748b);
+}
+
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 12px 0;
+}
+
+.kpi {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px;
+  background: #fff;
+}
+
+.kpi .kpi-label {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.kpi .kpi-value {
+  font-size: 24px;
+  font-weight: 800;
+  margin-top: 6px;
+}
+
+@media (max-width: 900px) {
+  .kpi-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .actions {
   display: flex;
   gap: 8px;

@@ -163,6 +163,7 @@ function parsePromoPayload(body) {
 
   return {
     code: String(body.code || '').trim(),
+    local_name: String(body.local_name || '').trim() || null,
     discount_type: discountType,
     discount_value: discountValue,
     is_active: body.is_active === 'on',
@@ -282,6 +283,33 @@ router.get('/promo-codes', async (req, res) => {
       discountLabels: PROMO_DISCOUNT_LABELS,
       error: error.message,
       success: null,
+    });
+  }
+});
+
+router.get('/promo-codes/:id/stats', async (req, res) => {
+  const dateFrom = String(req.query.date_from || '').trim() || null;
+  const dateTo = String(req.query.date_to || '').trim() || null;
+  try {
+    const [promoCodes, stats] = await Promise.all([
+      api.getPromoCodes(),
+      api.getPromoCodeStats(req.params.id, { dateFrom, dateTo }),
+    ]);
+    const promo = promoCodes.find((item) => String(item.id) === String(req.params.id)) || null;
+    res.render('promo-code-stats', {
+      promo,
+      stats,
+      dateFrom,
+      dateTo,
+      error: req.query.error || null,
+    });
+  } catch (error) {
+    res.render('promo-code-stats', {
+      promo: null,
+      stats: null,
+      dateFrom,
+      dateTo,
+      error: error.message,
     });
   }
 });

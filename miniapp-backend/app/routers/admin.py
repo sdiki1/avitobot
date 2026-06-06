@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from datetime import date, datetime, time, timezone
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import and_, desc, func, select
 from sqlalchemy.orm import Session
 
@@ -20,6 +22,7 @@ from app.schemas import (
     PaymentResponse,
     PromoCodeCreate,
     PromoCodeResponse,
+    PromoCodeStatsResponse,
     PromoCodeUpdate,
     ProxyCreate,
     ProxyResponse,
@@ -141,6 +144,10 @@ def _normalize_promo_payload(data: dict) -> dict:
         if not code:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Укажите промокод")
         normalized["code"] = code
+
+    if "local_name" in normalized:
+        local_name = str(normalized.get("local_name") or "").strip()
+        normalized["local_name"] = local_name or None
 
     discount_type = normalized.get("discount_type")
     discount_value = normalized.get("discount_value")
@@ -619,6 +626,46 @@ def delete_plan(plan_id: int, db: Session = Depends(get_db)) -> dict:
 @router.get("/promo-codes", response_model=list[PromoCodeResponse])
 def list_promo_codes(db: Session = Depends(get_db)) -> list[PromoCode]:
     return list(db.scalars(select(PromoCode).order_by(PromoCode.id.asc())))
+
+
+@router.get("/promo-codes/{promo_code_id}/stats", response_model=PromoCodeStatsResponse)
+def promo_code_stats(
+    promo_code_id: int,
+    date_from: date | None = Query(default=None),
+    date_to: date | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> PromoCodeStatsResponse:
+    promo_code = db.get(PromoCode, promo_code_id)
+    if not promo_code:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Промокод не найден")
+
+    conditions = [
+        Payment.status == "completed",
+        Payment.payload["promo_code_id"].as_integer() == promo_code_id,
+    ]
+    if date_from is not None:
+        conditions.append(Payment.created_at >= datetime.combine(date_from, time.min, tzinfo=timezone.utc))
+    if date_to is not None:
+        conditions.append(Payment.created_at <= datetime.combine(date_to, time.max, tzinfo=timezone.utc))
+
+    row = db.execute(
+        select(
+            func.count(Payment.id),
+            func.coalesce(func.sum(Payment.amount_rub), 0),
+            func.coalesce(func.sum(Payment.payload["promo_discount_rub"].as_integer()), 0),
+        ).where(and_(*conditions))
+    ).one()
+
+    return PromoCodeStatsResponse(
+        promo_code_id=promo_code.id,
+        code=promo_code.code,
+        local_name=promo_code.local_name,
+        date_from=date_from,
+        date_to=date_to,
+        total_purchases=int(row[0] or 0),
+        total_revenue_rub=int(row[1] or 0),
+        total_discount_rub=int(row[2] or 0),
+    )
 
 
 @router.post("/promo-codes", response_model=PromoCodeResponse)

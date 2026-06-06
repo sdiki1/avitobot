@@ -107,6 +107,8 @@ def init_db() -> None:
         conn.exec_driver_sql("CREATE UNIQUE INDEX IF NOT EXISTS uq_users_referral_code ON users (referral_code)")
         conn.exec_driver_sql("UPDATE users SET referral_code = 'ref_' || telegram_id::text WHERE referral_code IS NULL")
         conn.exec_driver_sql("UPDATE users SET referral_balance_rub = 0 WHERE referral_balance_rub IS NULL")
+        conn.exec_driver_sql("ALTER TABLE users ADD COLUMN IF NOT EXISTS saved_promo_code_id INTEGER")
+        conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_users_saved_promo_code_id ON users (saved_promo_code_id)")
 
         conn.exec_driver_sql("ALTER TABLE monitorings ADD COLUMN IF NOT EXISTS bot_id INTEGER")
         conn.exec_driver_sql("ALTER TABLE monitorings ADD COLUMN IF NOT EXISTS link_configured BOOLEAN DEFAULT FALSE")
@@ -169,6 +171,7 @@ def init_db() -> None:
             ")"
         )
         conn.exec_driver_sql("ALTER TABLE promo_codes ADD COLUMN IF NOT EXISTS code VARCHAR(64)")
+        conn.exec_driver_sql("ALTER TABLE promo_codes ADD COLUMN IF NOT EXISTS local_name VARCHAR(255)")
         conn.exec_driver_sql("ALTER TABLE promo_codes ADD COLUMN IF NOT EXISTS discount_type VARCHAR(16)")
         conn.exec_driver_sql("ALTER TABLE promo_codes ADD COLUMN IF NOT EXISTS discount_value INTEGER")
         conn.exec_driver_sql("ALTER TABLE promo_codes ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE")

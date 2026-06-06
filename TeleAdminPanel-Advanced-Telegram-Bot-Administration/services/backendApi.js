@@ -30,6 +30,13 @@ exports.updatePlan = (id, payload) => request(`/plans/${id}`, { method: 'PUT', b
 exports.deletePlan = (id) => request(`/plans/${id}`, { method: 'DELETE' });
 
 exports.getPromoCodes = () => request('/promo-codes');
+exports.getPromoCodeStats = (id, { dateFrom, dateTo } = {}) => {
+  const params = new URLSearchParams();
+  if (dateFrom) params.set('date_from', dateFrom);
+  if (dateTo) params.set('date_to', dateTo);
+  const query = params.toString();
+  return request(`/promo-codes/${id}/stats${query ? `?${query}` : ''}`);
+};
 exports.createPromoCode = (payload) => request('/promo-codes', { method: 'POST', body: JSON.stringify(payload) });
 exports.updatePromoCode = (id, payload) => request(`/promo-codes/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
 exports.deletePromoCode = (id) => request(`/promo-codes/${id}`, { method: 'DELETE' });

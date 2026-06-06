@@ -32,6 +32,11 @@ class User(Base):
     )
     referral_code: Mapped[str | None] = mapped_column(String(64), unique=True, index=True, nullable=True)
     referral_balance_rub: Mapped[int] = mapped_column(Integer, default=0)
+    saved_promo_code_id: Mapped[int | None] = mapped_column(
+        ForeignKey("promo_codes.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -92,6 +97,7 @@ class PromoCode(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     code: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    local_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     discount_type: Mapped[str] = mapped_column(String(16))
     discount_value: Mapped[int] = mapped_column(Integer)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)

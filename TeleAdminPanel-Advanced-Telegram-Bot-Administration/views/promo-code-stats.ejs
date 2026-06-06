@@ -1,0 +1,57 @@
+<%- include('partials/header', { title: 'Статистика промокода' }) %>
+
+<section class="card">
+  <h1>Статистика промокода<% if (promo) { %>: <%= promo.code %><% } %></h1>
+  <% if (promo && promo.local_name) { %>
+    <p class="muted">Локальное название: <strong><%= promo.local_name %></strong></p>
+  <% } %>
+  <p><a class="button secondary" href="<%= adminBase %>/promo-codes">← К списку промокодов</a></p>
+
+  <% if (error) { %>
+    <div class="alert error"><%= error %></div>
+  <% } %>
+
+  <h2>Период</h2>
+  <form class="form-grid two" action="<%= adminBase %>/promo-codes/<%= promo ? promo.id : '' %>/stats" method="get">
+    <label class="field">
+      <span>С даты</span>
+      <input type="date" name="date_from" value="<%= dateFrom || '' %>" />
+    </label>
+    <label class="field">
+      <span>По дату</span>
+      <input type="date" name="date_to" value="<%= dateTo || '' %>" />
+    </label>
+    <button type="submit">Показать</button>
+    <a class="button secondary" href="<%= adminBase %>/promo-codes/<%= promo ? promo.id : '' %>/stats">Сбросить период</a>
+  </form>
+  <p class="muted">
+    <% if (dateFrom || dateTo) { %>
+      Период: <%= dateFrom || '…' %> — <%= dateTo || '…' %>
+    <% } else { %>
+      Показана статистика за всё время.
+    <% } %>
+  </p>
+</section>
+
+<% if (stats) { %>
+<section class="card">
+  <h2>Итоги</h2>
+  <div class="kpi-grid">
+    <div class="kpi">
+      <div class="kpi-label">Куплено подписок</div>
+      <div class="kpi-value"><%= stats.total_purchases || 0 %></div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Выручка (оплачено)</div>
+      <div class="kpi-value"><%= (stats.total_revenue_rub || 0).toLocaleString('ru-RU') %> ₽</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Сумма скидок</div>
+      <div class="kpi-value"><%= (stats.total_discount_rub || 0).toLocaleString('ru-RU') %> ₽</div>
+    </div>
+  </div>
+  <p class="muted">Учитываются только завершённые (оплаченные) покупки.</p>
+</section>
+<% } %>
+
+<%- include('partials/footer') %>

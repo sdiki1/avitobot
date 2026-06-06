@@ -105,6 +105,7 @@ class TariffPlanResponse(TariffPlanBase):
 
 class PromoCodeBase(BaseModel):
     code: str = Field(min_length=3, max_length=64)
+    local_name: str | None = Field(default=None, max_length=255)
     discount_type: str = Field(min_length=3, max_length=16)
     discount_value: int = Field(gt=0)
     is_active: bool = True
@@ -116,6 +117,7 @@ class PromoCodeCreate(PromoCodeBase):
 
 class PromoCodeUpdate(BaseModel):
     code: str | None = Field(default=None, min_length=3, max_length=64)
+    local_name: str | None = Field(default=None, max_length=255)
     discount_type: str | None = Field(default=None, min_length=3, max_length=16)
     discount_value: int | None = Field(default=None, gt=0)
     is_active: bool | None = None
@@ -129,6 +131,17 @@ class PromoCodeResponse(PromoCodeBase):
 
     class Config:
         from_attributes = True
+
+
+class PromoCodeStatsResponse(BaseModel):
+    promo_code_id: int
+    code: str
+    local_name: str | None = None
+    date_from: date | None = None
+    date_to: date | None = None
+    total_purchases: int = 0
+    total_revenue_rub: int = 0
+    total_discount_rub: int = 0
 
 
 class MonitoringCreate(BaseModel):

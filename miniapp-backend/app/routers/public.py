@@ -478,6 +478,10 @@ def _finalize_subscription_payment(
         if promo_code:
             promo_code.usage_count = int(promo_code.usage_count or 0) + 1
             payload["promo_counted"] = True
+    if promo_code_id > 0:
+        # Запоминаем промокод за пользователем, чтобы автоматически применять его
+        # ко всем последующим подпискам (пока промокод не отключат).
+        user.saved_promo_code_id = promo_code_id
     payment.status = "completed"
     payload["finalized"] = True
     payload["subscription_id"] = subscription.id
@@ -1054,7 +1058,12 @@ def purchase_subscription(
     target_total_slots = current_total_slots + slots_to_add
 
     base_price = max(0, int(plan.price_rub))
-    promo_code, promo_discount = _resolve_promo_discount(db, payload.promo_code, base_price)
+    requested_promo = payload.promo_code
+    if not str(requested_promo or "").strip() and user.saved_promo_code_id:
+        saved_promo = db.get(PromoCode, user.saved_promo_code_id)
+        if saved_promo and saved_promo.is_active:
+            requested_promo = saved_promo.code
+    promo_code, promo_discount = _resolve_promo_discount(db, requested_promo, base_price)
     total_price = max(0, base_price - promo_discount)
 
     referral_used = 0
