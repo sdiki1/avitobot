@@ -210,7 +210,7 @@ class MonitoringItemResponse(BaseModel):
 
 
 class ProxyCreate(BaseModel):
-    name: str
+    name: str | None = None
     proxy_url: str
     change_ip_url: str | None = None
     is_active: bool = True

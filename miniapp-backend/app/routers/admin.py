@@ -64,6 +64,7 @@ from app.services.helpers import (
 )
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin_token)])
+AUTO_PROXY_NAME_PREFIX = "proxy-auto-"
 
 
 def _build_bot_link(username: str | None) -> str | None:
@@ -135,6 +136,16 @@ def _normalize_duration_label(value: str | None, duration_days: int) -> str:
     if label:
         return label
     return f"{int(duration_days)} дней"
+
+
+def _build_auto_proxy_name(db: Session) -> str:
+    index = int(db.scalar(select(func.count(ProxyConfig.id))) or 0) + 1
+    while True:
+        name = f"{AUTO_PROXY_NAME_PREFIX}{index}"
+        existing = db.scalar(select(ProxyConfig.id).where(ProxyConfig.name == name))
+        if not existing:
+            return name
+        index += 1
 
 
 def _normalize_promo_payload(data: dict) -> dict:
@@ -733,7 +744,7 @@ def list_proxies(db: Session = Depends(get_db)) -> list[ProxyConfig]:
 
 @router.post("/proxies", response_model=ProxyResponse)
 def create_proxy(payload: ProxyCreate, db: Session = Depends(get_db)) -> ProxyConfig:
-    normalized_name = (payload.name or "").strip()
+    normalized_name = (payload.name or "").strip() or _build_auto_proxy_name(db)
     if normalized_name.startswith("env-proxy-"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Reserved proxy name prefix")
     normalized_proxy_url = normalize_proxy_url(payload.proxy_url)

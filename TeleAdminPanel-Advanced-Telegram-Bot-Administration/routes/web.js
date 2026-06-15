@@ -354,7 +354,7 @@ router.get('/proxies', async (req, res) => {
 router.post('/proxies', async (req, res) => {
   try {
     await api.createProxy({
-      name: req.body.name,
+      name: String(req.body.name || '').trim() || null,
       proxy_url: proxyUrlFromBody(req.body),
       change_ip_url: req.body.change_ip_url || null,
       is_active: req.body.is_active === 'on',
