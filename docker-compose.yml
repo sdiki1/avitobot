@@ -109,10 +109,9 @@ services:
       context: ./miniapp-frontend
       args:
         NODE_IMAGE: ${NODE_IMAGE:-node:20-alpine}
+        VITE_API_BASE_URL: ${PUBLIC_BACKEND_URL:-/api}
     container_name: avitobot-frontend
     restart: unless-stopped
-    environment:
-      VITE_API_BASE_URL: ${PUBLIC_BACKEND_URL:-/api}
     depends_on:
       miniapp-backend:
         condition: service_started

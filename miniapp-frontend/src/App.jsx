@@ -73,6 +73,20 @@ function getTelegramInitData() {
   return webapp.initData
 }
 
+function waitForTelegramWebApp(timeoutMs = 1500) {
+  if (window.Telegram?.WebApp) return Promise.resolve()
+
+  return new Promise((resolve) => {
+    const startedAt = Date.now()
+    const timerId = window.setInterval(() => {
+      if (window.Telegram?.WebApp || Date.now() - startedAt >= timeoutMs) {
+        window.clearInterval(timerId)
+        resolve()
+      }
+    }, 50)
+  })
+}
+
 function getAuthTokenFromQuery() {
   return new URLSearchParams(window.location.search).get('auth')
 }
@@ -410,6 +424,7 @@ export default function App() {
         let resolvedTelegramId = null
         let authError = false
 
+        await waitForTelegramWebApp()
         const initData = getTelegramInitData()
         if (initData) {
           try {
