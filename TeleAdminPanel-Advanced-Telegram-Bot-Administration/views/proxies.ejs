@@ -23,7 +23,7 @@
   </p>
 
   <h2>Добавить прокси</h2>
-  <form class="form-grid" action="<%= adminBase %>/proxies" method="post">
+  <form class="form-grid" action="<%= adminBase %>/proxies/create" method="get">
     <label class="field">
       <span>Название (необязательно)</span>
       <input name="name" placeholder="Сгенерируется автоматически" />
@@ -91,7 +91,7 @@
             <% } %>
           </td>
           <td>
-            <form class="form-grid two" action="<%= adminBase %>/proxies/<%= proxy.id %>/update" method="post">
+            <form class="form-grid two" action="<%= adminBase %>/proxies/<%= proxy.id %>/update" method="get">
               <label class="field">
                 <span>Название</span>
                 <input name="name" value="<%= proxy.name %>" required />
@@ -129,7 +129,7 @@
               <span class="muted js-proxy-active-state" data-proxy-id="<%= proxy.id %>"></span>
               <button type="submit">Сохранить</button>
             </form>
-            <form action="<%= adminBase %>/proxies/<%= proxy.id %>/delete" method="post">
+            <form action="<%= adminBase %>/proxies/<%= proxy.id %>/delete" method="get">
               <button class="danger" type="submit">Удалить</button>
             </form>
           </td>
@@ -156,11 +156,8 @@
         if (info) info.textContent = 'Сохраняем...';
 
         try {
-          const response = await fetch(`${adminBase}/proxies/${proxyId}/active`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ is_active: nextState }),
-          });
+          const params = new URLSearchParams({ is_active: String(nextState) });
+          const response = await fetch(`${adminBase}/proxies/${proxyId}/active?${params.toString()}`);
           const payload = await response.json();
           if (!response.ok || !payload.ok) {
             throw new Error(payload.error || 'Не удалось обновить прокси');

@@ -25,7 +25,7 @@
   <% } %>
 
   <h2>Добавить платеж</h2>
-  <form class="form-grid" action="<%= adminBase %>/payments" method="post">
+  <form class="form-grid" action="<%= adminBase %>/payments/create" method="get">
     <input name="telegram_id" type="number" placeholder="Telegram ID" required />
     <select name="plan_id" required>
       <option value="">Тариф</option>

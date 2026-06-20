@@ -54,7 +54,7 @@
             <% } %>
           </td>
           <td>
-            <form class="stack" action="<%= adminBase %>/monitorings/<%= m.id %>/update" method="post">
+            <form class="stack" action="<%= adminBase %>/monitorings/<%= m.id %>/update" method="get">
               <input name="title" value="<%= m.title || '' %>" placeholder="Название" />
               <input name="url" value="<%= m.url || '' %>" placeholder="https://www.avito.ru/..." />
               <label class="field">

@@ -12,7 +12,7 @@
   <% } %>
 
   <h2>Добавить тариф</h2>
-  <form class="form-grid" action="<%= adminBase %>/plans" method="post">
+  <form class="form-grid" action="<%= adminBase %>/plans/create" method="get">
     <select name="plan_format" required>
       <option value="standard"><%= planFormatLabels.standard %></option>
       <option value="speed"><%= planFormatLabels.speed %></option>
@@ -61,7 +61,7 @@
             <span class="badge <%= plan.is_active ? 'active' : 'disabled' %>"><%= plan.is_active ? 'active' : 'disabled' %></span>
           </td>
           <td>
-            <form class="form-grid two" action="<%= adminBase %>/plans/<%= plan.id %>/update" method="post">
+            <form class="form-grid two" action="<%= adminBase %>/plans/<%= plan.id %>/update" method="get">
               <select name="plan_format" required>
                 <option value="standard" <%= format === 'standard' ? 'selected' : '' %>><%= planFormatLabels.standard %></option>
                 <option value="speed" <%= format === 'speed' ? 'selected' : '' %>><%= planFormatLabels.speed %></option>
@@ -76,7 +76,7 @@
               </label>
               <button type="submit">Сохранить</button>
             </form>
-            <form action="<%= adminBase %>/plans/<%= plan.id %>/delete" method="post">
+            <form action="<%= adminBase %>/plans/<%= plan.id %>/delete" method="get">
               <button class="danger" type="submit">Удалить</button>
             </form>
           </td>

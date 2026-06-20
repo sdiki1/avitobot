@@ -1,8 +1,10 @@
 import logging
 from threading import Event, Thread
+from urllib.parse import parse_qsl, urlencode
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.types import Message
 
 from app.config import settings
 from app.database import SessionLocal
@@ -27,6 +29,31 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def restore_get_body_from_query(request, call_next):
+    if request.method == "GET" and "__body" in request.query_params:
+        pairs = parse_qsl(request.scope.get("query_string", b"").decode("utf-8"), keep_blank_values=True)
+        body_values = [value for key, value in pairs if key == "__body"]
+        filtered_query = urlencode([(key, value) for key, value in pairs if key != "__body"], doseq=True)
+        request.scope["query_string"] = filtered_query.encode("utf-8")
+
+        body = (body_values[-1] if body_values else "").encode("utf-8")
+        request.scope["headers"] = [
+            (key, value)
+            for key, value in request.scope.get("headers", [])
+            if key.lower() not in {b"content-type", b"content-length"}
+        ]
+        request.scope["headers"].append((b"content-type", b"application/json"))
+        request.scope["headers"].append((b"content-length", str(len(body)).encode("ascii")))
+
+        async def receive() -> Message:
+            return {"type": "http.request", "body": body, "more_body": False}
+
+        request._receive = receive
+
+    return await call_next(request)
 
 
 @app.on_event("startup")

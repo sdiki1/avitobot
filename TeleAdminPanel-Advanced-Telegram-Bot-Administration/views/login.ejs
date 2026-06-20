@@ -17,7 +17,7 @@
         <% if (typeof error !== 'undefined' && error) { %>
           <div class="alert error" style="margin-bottom:14px"><%= error %></div>
         <% } %>
-        <form class="stack" action="<%= adminBase %>/login" method="post">
+        <form class="stack" action="<%= adminBase %>/login" method="get">
           <input type="text" name="username" placeholder="Имя пользователя" required autocomplete="username" />
           <input type="password" name="password" placeholder="Пароль" required autocomplete="current-password" />
           <button type="submit">Войти</button>

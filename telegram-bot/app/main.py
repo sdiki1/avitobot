@@ -694,6 +694,15 @@ class BackendAPI:
     async def close(self) -> None:
         await self.client.aclose()
 
+    async def get_with_payload(
+        self,
+        url: str,
+        payload: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> httpx.Response:
+        params = {"__body": json.dumps(payload)} if payload is not None else None
+        return await self.client.get(url, params=params, headers=headers)
+
     async def auth_user(
         self,
         telegram_id: int,
@@ -707,7 +716,7 @@ class BackendAPI:
             "full_name": full_name,
             "referral_code": referral_code,
         }
-        response = await self.client.post(f"{BACKEND_URL}/api/v1/public/auth/telegram", json=payload)
+        response = await self.get_with_payload(f"{BACKEND_URL}/api/v1/public/auth/telegram", payload)
         response.raise_for_status()
         return response.json()
 
@@ -736,9 +745,9 @@ class BackendAPI:
         return payload if isinstance(payload, dict) else {}
 
     async def onboarding_trial(self, telegram_id: int) -> dict[str, Any]:
-        response = await self.client.post(
+        response = await self.get_with_payload(
             f"{BACKEND_URL}/api/v1/public/onboarding-trial",
-            json={"telegram_id": telegram_id},
+            {"telegram_id": telegram_id},
         )
         response.raise_for_status()
         payload = response.json()
@@ -758,9 +767,9 @@ class BackendAPI:
             "telegram_bot_id": telegram_bot_id,
             "bot_username": bot_username,
         }
-        response = await self.client.post(
+        response = await self.get_with_payload(
             f"{BACKEND_URL}/api/v1/internal/bots/{bot_id}/sync",
-            json=payload,
+            payload,
             headers={"X-Internal-Token": INTERNAL_API_TOKEN},
         )
         response.raise_for_status()
@@ -775,27 +784,27 @@ class BackendAPI:
 
     async def start_monitoring(self, bot_id: int, telegram_id: int) -> tuple[int, dict[str, Any]]:
         payload = {"telegram_id": telegram_id, "bot_id": bot_id}
-        response = await self.client.post(
+        response = await self.get_with_payload(
             f"{BACKEND_URL}/api/v1/internal/bot-monitoring/start",
-            json=payload,
+            payload,
             headers={"X-Internal-Token": INTERNAL_API_TOKEN},
         )
         return response.status_code, _response_json(response)
 
     async def stop_monitoring(self, bot_id: int, telegram_id: int) -> tuple[int, dict[str, Any]]:
         payload = {"telegram_id": telegram_id, "bot_id": bot_id}
-        response = await self.client.post(
+        response = await self.get_with_payload(
             f"{BACKEND_URL}/api/v1/internal/bot-monitoring/stop",
-            json=payload,
+            payload,
             headers={"X-Internal-Token": INTERNAL_API_TOKEN},
         )
         return response.status_code, _response_json(response)
 
     async def change_link(self, bot_id: int, telegram_id: int, url: str) -> tuple[int, dict[str, Any]]:
         payload = {"telegram_id": telegram_id, "bot_id": bot_id, "url": url}
-        response = await self.client.post(
+        response = await self.get_with_payload(
             f"{BACKEND_URL}/api/v1/internal/bot-monitoring/change-link",
-            json=payload,
+            payload,
             headers={"X-Internal-Token": INTERNAL_API_TOKEN},
         )
         return response.status_code, _response_json(response)
@@ -818,7 +827,7 @@ class BackendAPI:
         return payload if isinstance(payload, list) else []
 
     async def mark_notification_sent(self, notification_id: int) -> None:
-        response = await self.client.post(
+        response = await self.get_with_payload(
             f"{BACKEND_URL}/api/v1/internal/notifications/{notification_id}/sent",
             headers={"X-Internal-Token": INTERNAL_API_TOKEN},
         )
@@ -827,9 +836,9 @@ class BackendAPI:
     async def mark_notifications_sent(self, notification_ids: list[int]) -> None:
         if not notification_ids:
             return
-        response = await self.client.post(
+        response = await self.get_with_payload(
             f"{BACKEND_URL}/api/v1/internal/notifications/sent-batch",
-            json={"notification_ids": notification_ids},
+            {"notification_ids": notification_ids},
             headers={"X-Internal-Token": INTERNAL_API_TOKEN},
         )
         response.raise_for_status()

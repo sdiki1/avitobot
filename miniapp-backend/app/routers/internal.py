@@ -154,7 +154,7 @@ def active_bots(db: Session = Depends(get_db)) -> list[InternalBotConfigResponse
     ]
 
 
-@router.post("/bots/{bot_id}/sync")
+@router.get("/bots/{bot_id}/sync")
 def sync_bot(bot_id: int, payload: InternalBotSyncRequest, db: Session = Depends(get_db)) -> dict:
     bot = db.get(TelegramBot, bot_id)
     if not bot:
@@ -186,7 +186,7 @@ def active_subscription_info(telegram_id: int, db: Session = Depends(get_db)) ->
     }
 
 
-@router.post("/proxies/blocked")
+@router.get("/proxies/blocked")
 def mark_proxy_blocked(payload: InternalProxyBlockedRequest, db: Session = Depends(get_db)) -> dict:
     raw_proxy = (payload.proxy_url or "").strip()
     if not raw_proxy:
@@ -286,7 +286,7 @@ def active_monitorings(db: Session = Depends(get_db)) -> list[dict]:
     return payload
 
 
-@router.post("/monitorings/{monitoring_id}/scan-result")
+@router.get("/monitorings/{monitoring_id}/scan-result")
 def save_scan_result(monitoring_id: int, payload: InternalScanPayload, db: Session = Depends(get_db)) -> dict:
     monitoring = db.get(Monitoring, monitoring_id)
     if not monitoring:
@@ -482,7 +482,7 @@ def monitoring_state(monitoring_id: int, db: Session = Depends(get_db)) -> dict:
     }
 
 
-@router.post("/bot-monitoring/start", response_model=InternalBotLookupResponse)
+@router.get("/bot-monitoring/start", response_model=InternalBotLookupResponse)
 def bot_start_monitoring(payload: InternalBotCommandRequest, db: Session = Depends(get_db)) -> InternalBotLookupResponse:
     monitoring = _resolve_user_monitoring(db, telegram_id=payload.telegram_id, bot_id=payload.bot_id)
     _require_active_subscription(db, monitoring.user_id)
@@ -499,7 +499,7 @@ def bot_start_monitoring(payload: InternalBotCommandRequest, db: Session = Depen
     return _bot_lookup_with_subscription(db, monitoring)
 
 
-@router.post("/bot-monitoring/stop", response_model=InternalBotLookupResponse)
+@router.get("/bot-monitoring/stop", response_model=InternalBotLookupResponse)
 def bot_stop_monitoring(payload: InternalBotCommandRequest, db: Session = Depends(get_db)) -> InternalBotLookupResponse:
     monitoring = _resolve_user_monitoring(db, telegram_id=payload.telegram_id, bot_id=payload.bot_id)
     _clear_monitoring_notifications(db, monitoring)
@@ -509,7 +509,7 @@ def bot_stop_monitoring(payload: InternalBotCommandRequest, db: Session = Depend
     return _bot_lookup_with_subscription(db, monitoring)
 
 
-@router.post("/bot-monitoring/change-link", response_model=InternalBotLookupResponse)
+@router.get("/bot-monitoring/change-link", response_model=InternalBotLookupResponse)
 def bot_change_link(payload: InternalBotCommandRequest, db: Session = Depends(get_db)) -> InternalBotLookupResponse:
     monitoring = _resolve_user_monitoring(db, telegram_id=payload.telegram_id, bot_id=payload.bot_id)
     cleaned_url = normalize_monitoring_url(payload.url)
@@ -559,7 +559,7 @@ def pending_notifications(
     return out
 
 
-@router.post("/notifications/{notification_id}/sent")
+@router.get("/notifications/{notification_id}/sent")
 def mark_sent(notification_id: int, db: Session = Depends(get_db)) -> dict:
     notification = db.get(Notification, notification_id)
     if not notification:
@@ -570,7 +570,7 @@ def mark_sent(notification_id: int, db: Session = Depends(get_db)) -> dict:
     return {"ok": True}
 
 
-@router.post("/notifications/sent-batch")
+@router.get("/notifications/sent-batch")
 def mark_sent_batch(payload: InternalNotificationsSentBatchRequest, db: Session = Depends(get_db)) -> dict:
     ids = sorted({int(notification_id) for notification_id in (payload.notification_ids or []) if int(notification_id) > 0})
     if not ids:

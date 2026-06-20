@@ -516,7 +516,7 @@ def _finalize_subscription_payment(
     return subscription
 
 
-@router.post("/auth/telegram", response_model=UserResponse)
+@router.get("/auth/telegram", response_model=UserResponse)
 def telegram_auth(payload: TelegramAuthRequest, db: Session = Depends(get_db)) -> User:
     existed_before = db.scalar(select(User.id).where(User.telegram_id == payload.telegram_id)) is not None
     user = get_or_create_user(
@@ -545,7 +545,7 @@ def telegram_auth(payload: TelegramAuthRequest, db: Session = Depends(get_db)) -
     return user
 
 
-@router.post("/auth/miniapp/signin", response_model=TelegramAuthResolveResponse)
+@router.get("/auth/miniapp/signin", response_model=TelegramAuthResolveResponse)
 def miniapp_signin(
     payload: MiniAppSignInRequest,
     response: Response,
@@ -574,7 +574,7 @@ def miniapp_session(auth_user: User = Depends(require_miniapp_user)) -> Telegram
     )
 
 
-@router.post("/auth/logout")
+@router.get("/auth/logout")
 def miniapp_logout(response: Response) -> dict[str, bool]:
     clear_miniapp_session(response)
     return {"ok": True}
@@ -598,7 +598,7 @@ def resolve_auth(
     )
 
 
-@router.post("/onboarding-trial", response_model=OnboardingTrialResponse)
+@router.get("/onboarding-trial", response_model=OnboardingTrialResponse)
 def onboarding_trial(
     payload: OnboardingTrialRequest,
     auth_user: User = Depends(require_miniapp_user),
@@ -635,7 +635,7 @@ def miniapp_content(db: Session = Depends(get_db)) -> MiniAppContentResponse:
     return _miniapp_content_response(values)
 
 
-@router.post("/promo-codes/check", response_model=PromoCodeCheckResponse)
+@router.get("/promo-codes/check", response_model=PromoCodeCheckResponse)
 def check_promo_code(
     payload: PromoCodeCheckRequest,
     auth_user: User = Depends(require_miniapp_user),
@@ -804,7 +804,7 @@ def list_monitorings(
     return [_monitoring_to_schema(m, sub_map.get(int(m.id))) for m in monitorings]
 
 
-@router.post("/monitorings", response_model=MonitoringResponse)
+@router.get("/monitorings/create", response_model=MonitoringResponse)
 def create_monitoring(
     payload: MonitoringCreate,
     auth_user: User = Depends(require_miniapp_user),
@@ -851,7 +851,7 @@ def create_monitoring(
     return _monitoring_to_schema(monitoring, sub_map.get(int(monitoring.id)))
 
 
-@router.patch("/monitorings/{monitoring_id}", response_model=MonitoringResponse)
+@router.get("/monitorings/{monitoring_id}/update", response_model=MonitoringResponse)
 def update_monitoring(
     monitoring_id: int,
     payload: MonitoringUpdate,
@@ -979,7 +979,7 @@ def update_monitoring(
     return _monitoring_to_schema(monitoring, sub_map.get(int(monitoring.id)))
 
 
-@router.post("/monitorings/purchase", response_model=MonitoringResponse)
+@router.get("/monitorings/purchase", response_model=MonitoringResponse)
 def purchase_monitoring(
     payload: MonitoringPurchaseRequest,
     auth_user: User = Depends(require_miniapp_user),
@@ -1021,7 +1021,7 @@ def purchase_monitoring(
     return _monitoring_to_schema(monitoring, sub_map.get(int(monitoring.id)))
 
 
-@router.post("/subscriptions/purchase", response_model=PurchaseSubscriptionResponse)
+@router.get("/subscriptions/purchase", response_model=PurchaseSubscriptionResponse)
 def purchase_subscription(
     payload: PurchaseSubscriptionRequest,
     auth_user: User = Depends(require_miniapp_user),
@@ -1407,7 +1407,7 @@ def subscription_purchase_status(
     )
 
 
-@webhook_router.post("/webhooks")
+@webhook_router.get("/webhooks")
 def yookassa_webhook(payload: dict, db: Session = Depends(get_db)) -> dict:
     event = str(payload.get("event") or "").strip().lower()
     obj = payload.get("object")
@@ -1471,7 +1471,7 @@ def yookassa_webhook(payload: dict, db: Session = Depends(get_db)) -> dict:
     return {"ok": True, "processed": "pending", "payment_id": payment.id, "status": yookassa_status}
 
 
-@router.delete("/monitorings/{monitoring_id}")
+@router.get("/monitorings/{monitoring_id}/delete")
 def delete_monitoring(
     monitoring_id: int,
     telegram_id: int = Query(...),

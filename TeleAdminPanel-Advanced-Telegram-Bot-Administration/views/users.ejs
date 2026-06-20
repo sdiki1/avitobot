@@ -10,7 +10,7 @@
   <% } %>
 
   <h2>Добавить администратора</h2>
-  <form class="form-grid" action="<%= adminBase %>/users/admins" method="post">
+  <form class="form-grid" action="<%= adminBase %>/users/admins" method="get">
     <input name="telegram_id" type="number" placeholder="Telegram ID" required />
     <input name="username" placeholder="username (опционально)" />
     <input name="full_name" placeholder="Имя (опционально)" />
@@ -104,11 +104,8 @@
         if (info) info.textContent = 'Сохраняем...';
 
         try {
-          const response = await fetch(`${adminBase}/users/${userId}/admin`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ is_admin: nextState }),
-          });
+          const params = new URLSearchParams({ is_admin: String(nextState) });
+          const response = await fetch(`${adminBase}/users/${userId}/admin?${params.toString()}`);
           const payload = await response.json();
           if (!response.ok || !payload.ok) {
             throw new Error(payload.error || 'Не удалось изменить роль');

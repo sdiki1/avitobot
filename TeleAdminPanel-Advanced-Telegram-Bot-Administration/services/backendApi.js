@@ -2,11 +2,12 @@ const BACKEND_URL = (process.env.BACKEND_URL || 'http://localhost:8001').replace
 const ADMIN_API_TOKEN = process.env.ADMIN_API_TOKEN || 'change_me_admin_token';
 
 async function request(path, options = {}) {
-  const url = `${BACKEND_URL}/api/v1/admin${path}`;
+  const url = new URL(`${BACKEND_URL}/api/v1/admin${path}`);
+  if (options.body) {
+    url.searchParams.set('__body', String(options.body));
+  }
   const response = await fetch(url, {
-    ...options,
     headers: {
-      'Content-Type': 'application/json',
       'X-Admin-Token': ADMIN_API_TOKEN,
       ...(options.headers || {}),
     },
@@ -23,11 +24,15 @@ async function request(path, options = {}) {
   return response.json();
 }
 
+function withPayload(payload) {
+  return { body: JSON.stringify(payload) };
+}
+
 exports.getStats = () => request('/stats');
 exports.getPlans = () => request('/plans');
-exports.createPlan = (payload) => request('/plans', { method: 'POST', body: JSON.stringify(payload) });
-exports.updatePlan = (id, payload) => request(`/plans/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
-exports.deletePlan = (id) => request(`/plans/${id}`, { method: 'DELETE' });
+exports.createPlan = (payload) => request('/plans/create', withPayload(payload));
+exports.updatePlan = (id, payload) => request(`/plans/${id}/update`, withPayload(payload));
+exports.deletePlan = (id) => request(`/plans/${id}/delete`);
 
 exports.getPromoCodes = () => request('/promo-codes');
 exports.getPromoCodeStats = (id, { dateFrom, dateTo } = {}) => {
@@ -37,39 +42,39 @@ exports.getPromoCodeStats = (id, { dateFrom, dateTo } = {}) => {
   const query = params.toString();
   return request(`/promo-codes/${id}/stats${query ? `?${query}` : ''}`);
 };
-exports.createPromoCode = (payload) => request('/promo-codes', { method: 'POST', body: JSON.stringify(payload) });
-exports.updatePromoCode = (id, payload) => request(`/promo-codes/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
-exports.deletePromoCode = (id) => request(`/promo-codes/${id}`, { method: 'DELETE' });
+exports.createPromoCode = (payload) => request('/promo-codes/create', withPayload(payload));
+exports.updatePromoCode = (id, payload) => request(`/promo-codes/${id}/update`, withPayload(payload));
+exports.deletePromoCode = (id) => request(`/promo-codes/${id}/delete`);
 
 exports.getProxies = () => request('/proxies');
-exports.createProxy = (payload) => request('/proxies', { method: 'POST', body: JSON.stringify(payload) });
-exports.updateProxy = (id, payload) => request(`/proxies/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
-exports.deleteProxy = (id) => request(`/proxies/${id}`, { method: 'DELETE' });
+exports.createProxy = (payload) => request('/proxies/create', withPayload(payload));
+exports.updateProxy = (id, payload) => request(`/proxies/${id}/update`, withPayload(payload));
+exports.deleteProxy = (id) => request(`/proxies/${id}/delete`);
 
 exports.getUsers = () => request('/users');
-exports.addAdminUser = (payload) => request('/users/admins', { method: 'POST', body: JSON.stringify(payload) });
-exports.updateUserAdmin = (id, payload) => request(`/users/${id}/admin`, { method: 'PUT', body: JSON.stringify(payload) });
+exports.addAdminUser = (payload) => request('/users/admins', withPayload(payload));
+exports.updateUserAdmin = (id, payload) => request(`/users/${id}/admin`, withPayload(payload));
 exports.getMonitorings = () => request('/monitorings');
-exports.updateMonitoring = (id, payload) => request(`/monitorings/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+exports.updateMonitoring = (id, payload) => request(`/monitorings/${id}/update`, withPayload(payload));
 exports.getTrialSettings = () => request('/trial-settings');
-exports.updateTrialSettings = (payload) => request('/trial-settings', { method: 'PUT', body: JSON.stringify(payload) });
+exports.updateTrialSettings = (payload) => request('/trial-settings/update', withPayload(payload));
 exports.getReferralSettings = () => request('/referral-settings');
-exports.updateReferralSettings = (payload) => request('/referral-settings', { method: 'PUT', body: JSON.stringify(payload) });
+exports.updateReferralSettings = (payload) => request('/referral-settings/update', withPayload(payload));
 exports.getMiniappContent = () => request('/miniapp-content');
-exports.updateMiniappContent = (payload) => request('/miniapp-content', { method: 'PUT', body: JSON.stringify(payload) });
+exports.updateMiniappContent = (payload) => request('/miniapp-content/update', withPayload(payload));
 
 exports.getBots = () => request('/bots');
-exports.createBot = (payload) => request('/bots', { method: 'POST', body: JSON.stringify(payload) });
-exports.updateBot = (id, payload) => request(`/bots/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
-exports.deleteBot = (id) => request(`/bots/${id}`, { method: 'DELETE' });
+exports.createBot = (payload) => request('/bots/create', withPayload(payload));
+exports.updateBot = (id, payload) => request(`/bots/${id}/update`, withPayload(payload));
+exports.deleteBot = (id) => request(`/bots/${id}/delete`);
 
 exports.getPayments = () => request('/payments');
-exports.createPayment = (payload) => request('/payments', { method: 'POST', body: JSON.stringify(payload) });
+exports.createPayment = (payload) => request('/payments/create', withPayload(payload));
 exports.activateSubscription = (payload) =>
-  request('/subscriptions/activate', { method: 'POST', body: JSON.stringify(payload) });
+  request('/subscriptions/activate', withPayload(payload));
 exports.grantBonusDaysAll = (payload) =>
-  request('/subscriptions/grant-days-all', { method: 'POST', body: JSON.stringify(payload) });
+  request('/subscriptions/grant-days-all', withPayload(payload));
 exports.grantBonusDaysUser = (payload) =>
-  request('/subscriptions/grant-days-user', { method: 'POST', body: JSON.stringify(payload) });
+  request('/subscriptions/grant-days-user', withPayload(payload));
 exports.broadcast = (payload) =>
-  request('/broadcast', { method: 'POST', body: JSON.stringify(payload) });
+  request('/broadcast', withPayload(payload));

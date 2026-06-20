@@ -158,10 +158,10 @@ class AvitoAdapter:
         }
         endpoint = f"{BACKEND_URL}/api/v1/internal/proxies/blocked"
         try:
-            response = requests.post(
+            response = requests.get(
                 endpoint,
                 headers=self._backend_headers(),
-                json=payload,
+                params={"__body": json.dumps(payload)},
                 timeout=max(3, min(REQUEST_TIMEOUT_SEC, 10)),
             )
             response.raise_for_status()

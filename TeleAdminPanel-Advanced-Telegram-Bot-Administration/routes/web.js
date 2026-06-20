@@ -241,7 +241,7 @@ router.get('/plans', async (req, res) => {
   }
 });
 
-router.post('/plans', async (req, res) => {
+router.get('/plans/create', async (req, res) => {
   try {
     await api.createPlan(parsePlanPayload(req.body));
     res.redirect(withAdminBase('/plans?success=Тариф+добавлен'));
@@ -250,7 +250,7 @@ router.post('/plans', async (req, res) => {
   }
 });
 
-router.post('/plans/:id/update', async (req, res) => {
+router.get('/plans/:id/update', async (req, res) => {
   try {
     await api.updatePlan(req.params.id, parsePlanPayload(req.body));
     res.redirect(withAdminBase('/plans?success=Тариф+обновлен'));
@@ -259,7 +259,7 @@ router.post('/plans/:id/update', async (req, res) => {
   }
 });
 
-router.post('/plans/:id/delete', async (req, res) => {
+router.get('/plans/:id/delete', async (req, res) => {
   try {
     await api.deletePlan(req.params.id);
     res.redirect(withAdminBase('/plans?success=Тариф+удален'));
@@ -314,7 +314,7 @@ router.get('/promo-codes/:id/stats', async (req, res) => {
   }
 });
 
-router.post('/promo-codes', async (req, res) => {
+router.get('/promo-codes/create', async (req, res) => {
   try {
     await api.createPromoCode(parsePromoPayload(req.body));
     res.redirect(withAdminBase('/promo-codes?success=Промокод+добавлен'));
@@ -323,7 +323,7 @@ router.post('/promo-codes', async (req, res) => {
   }
 });
 
-router.post('/promo-codes/:id/update', async (req, res) => {
+router.get('/promo-codes/:id/update', async (req, res) => {
   try {
     await api.updatePromoCode(req.params.id, parsePromoPayload(req.body));
     res.redirect(withAdminBase('/promo-codes?success=Промокод+обновлен'));
@@ -332,7 +332,7 @@ router.post('/promo-codes/:id/update', async (req, res) => {
   }
 });
 
-router.post('/promo-codes/:id/delete', async (req, res) => {
+router.get('/promo-codes/:id/delete', async (req, res) => {
   try {
     await api.deletePromoCode(req.params.id);
     res.redirect(withAdminBase('/promo-codes?success=Промокод+удален'));
@@ -351,7 +351,7 @@ router.get('/proxies', async (req, res) => {
   }
 });
 
-router.post('/proxies', async (req, res) => {
+router.get('/proxies/create', async (req, res) => {
   try {
     await api.createProxy({
       name: String(req.body.name || '').trim() || null,
@@ -366,7 +366,7 @@ router.post('/proxies', async (req, res) => {
   }
 });
 
-router.post('/proxies/:id/update', async (req, res) => {
+router.get('/proxies/:id/update', async (req, res) => {
   try {
     await api.updateProxy(req.params.id, {
       name: req.body.name,
@@ -381,7 +381,7 @@ router.post('/proxies/:id/update', async (req, res) => {
   }
 });
 
-router.post('/proxies/:id/active', async (req, res) => {
+router.get('/proxies/:id/active', async (req, res) => {
   try {
     await api.updateProxy(req.params.id, {
       is_active: Boolean(req.body.is_active),
@@ -392,7 +392,7 @@ router.post('/proxies/:id/active', async (req, res) => {
   }
 });
 
-router.post('/proxies/:id/delete', async (req, res) => {
+router.get('/proxies/:id/delete', async (req, res) => {
   try {
     await api.deleteProxy(req.params.id);
     res.redirect(withAdminBase('/proxies?success=Прокси+удален'));
@@ -410,7 +410,7 @@ router.get('/users', async (req, res) => {
   }
 });
 
-router.post('/users/admins', async (req, res) => {
+router.get('/users/admins', async (req, res) => {
   try {
     await api.addAdminUser({
       telegram_id: toInt(req.body.telegram_id),
@@ -423,7 +423,7 @@ router.post('/users/admins', async (req, res) => {
   }
 });
 
-router.post('/users/:id/admin', async (req, res) => {
+router.get('/users/:id/admin', async (req, res) => {
   try {
     await api.updateUserAdmin(req.params.id, {
       is_admin: Boolean(req.body.is_admin),
@@ -448,7 +448,7 @@ router.get('/monitorings', async (req, res) => {
   }
 });
 
-router.post('/monitorings/:id/update', async (req, res) => {
+router.get('/monitorings/:id/update', async (req, res) => {
   try {
     const payload = {
       title: req.body.title || null,
@@ -478,7 +478,7 @@ router.get('/bots', async (req, res) => {
   }
 });
 
-router.post('/bots', async (req, res) => {
+router.get('/bots/create', async (req, res) => {
   try {
     await api.createBot({
       name: req.body.name,
@@ -492,7 +492,7 @@ router.post('/bots', async (req, res) => {
   }
 });
 
-router.post('/bots/:id/update', async (req, res) => {
+router.get('/bots/:id/update', async (req, res) => {
   try {
     const payload = {
       name: req.body.name,
@@ -510,7 +510,7 @@ router.post('/bots/:id/update', async (req, res) => {
   }
 });
 
-router.post('/bots/:id/delete', async (req, res) => {
+router.get('/bots/:id/delete', async (req, res) => {
   try {
     await api.deleteBot(req.params.id);
     res.redirect(withAdminBase('/bots?success=Бот+удален'));
@@ -528,7 +528,7 @@ router.get('/payments', async (req, res) => {
   }
 });
 
-router.post('/payments', async (req, res) => {
+router.get('/payments/create', async (req, res) => {
   try {
     await api.createPayment({
       telegram_id: toInt(req.body.telegram_id),
@@ -542,7 +542,7 @@ router.post('/payments', async (req, res) => {
   }
 });
 
-router.post('/subscriptions/activate', async (req, res) => {
+router.get('/subscriptions/activate', async (req, res) => {
   try {
     await api.activateSubscription({
       telegram_id: toInt(req.body.telegram_id),
@@ -554,7 +554,7 @@ router.post('/subscriptions/activate', async (req, res) => {
   }
 });
 
-router.post('/subscriptions/grant-days-all', async (req, res) => {
+router.get('/subscriptions/grant-days-all', async (req, res) => {
   try {
     const days = toInt(req.body.days);
     if (!days || days <= 0) throw new Error('Укажите количество дней больше 0');
@@ -571,7 +571,7 @@ router.post('/subscriptions/grant-days-all', async (req, res) => {
   }
 });
 
-router.post('/broadcast', async (req, res) => {
+router.get('/broadcast', async (req, res) => {
   try {
     const text = String(req.body.text || '').trim();
     if (!text) throw new Error('Введите текст рассылки');
@@ -589,7 +589,7 @@ router.post('/broadcast', async (req, res) => {
   }
 });
 
-router.post('/subscriptions/grant-days-user', async (req, res) => {
+router.get('/subscriptions/grant-days-user', async (req, res) => {
   try {
     const days = toInt(req.body.days);
     const telegramId = toInt(req.body.telegram_id);
@@ -608,7 +608,7 @@ router.post('/subscriptions/grant-days-user', async (req, res) => {
   }
 });
 
-router.post('/trial-settings/update', async (req, res) => {
+router.get('/trial-settings/update', async (req, res) => {
   try {
     await api.updateTrialSettings({
       trial_days: toInt(req.body.trial_days) || 0,
@@ -619,7 +619,7 @@ router.post('/trial-settings/update', async (req, res) => {
   }
 });
 
-router.post('/referral-settings/update', async (req, res) => {
+router.get('/referral-settings/update', async (req, res) => {
   try {
     await api.updateReferralSettings({
       referral_reward_percent: normalizePercent(req.body.referral_reward_percent),
@@ -630,7 +630,7 @@ router.post('/referral-settings/update', async (req, res) => {
   }
 });
 
-router.post('/miniapp-content/update', async (req, res) => {
+router.get('/miniapp-content/update', async (req, res) => {
   try {
     await api.updateMiniappContent({
       support_title: req.body.support_title,

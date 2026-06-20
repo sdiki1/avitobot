@@ -4,13 +4,11 @@ import hmac
 import html
 import json
 import logging
-import mimetypes
 import re
 from pathlib import Path
 from typing import Any
 from urllib import request as urllib_request
-from urllib.parse import quote, urlsplit, urlunsplit
-from uuid import uuid4
+from urllib.parse import quote, urlencode, urlsplit, urlunsplit
 
 from sqlalchemy import Select, and_, func, or_, select
 from sqlalchemy.orm import Session
@@ -518,19 +516,18 @@ def _send_telegram_message(
     reply_markup: dict[str, Any] | None = None,
     disable_web_page_preview: bool = True,
 ) -> bool:
-    payload_data: dict[str, Any] = {
+    query_params: dict[str, Any] = {
         "chat_id": chat_id,
         "text": text,
-        "disable_web_page_preview": disable_web_page_preview,
+        "disable_web_page_preview": str(disable_web_page_preview).lower(),
     }
     if reply_markup:
-        payload_data["reply_markup"] = reply_markup
-    payload = json.dumps(payload_data).encode("utf-8")
+        query_params["reply_markup"] = json.dumps(reply_markup, ensure_ascii=False)
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage?{urlencode(query_params)}"
     req = urllib_request.Request(
-        f"https://api.telegram.org/bot{bot_token}/sendMessage",
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
+        url,
+        headers={"Accept": "application/json"},
+        method="GET",
     )
     try:
         with urllib_request.urlopen(req, timeout=10) as response:
@@ -565,49 +562,14 @@ def _send_telegram_photo(
     *,
     reply_markup: dict[str, Any] | None = None,
 ) -> bool:
-    try:
-        photo_bytes = photo_path.read_bytes()
-    except OSError as exc:
-        logger.warning("Failed to read static photo path='%s': %s", photo_path, exc)
-        return False
-
-    boundary = f"----AvitoBotBoundary{uuid4().hex}"
-    mime_type = mimetypes.guess_type(photo_path.name)[0] or "application/octet-stream"
-    body_parts: list[bytes] = []
-
-    def _append_field(name: str, value: str) -> None:
-        body_parts.append(f"--{boundary}\r\n".encode("utf-8"))
-        body_parts.append(f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("utf-8"))
-        body_parts.append(value.encode("utf-8"))
-        body_parts.append(b"\r\n")
-
-    _append_field("chat_id", str(chat_id))
-    _append_field("caption", caption)
-    if reply_markup:
-        _append_field("reply_markup", json.dumps(reply_markup, ensure_ascii=False))
-
-    body_parts.append(f"--{boundary}\r\n".encode("utf-8"))
-    body_parts.append(
-        f'Content-Disposition: form-data; name="photo"; filename="{photo_path.name}"\r\n'.encode("utf-8")
+    logger.warning("Skipping Telegram local photo upload path='%s': GET-only mode is enabled", photo_path)
+    return _send_telegram_message(
+        bot_token,
+        chat_id,
+        caption or "Фото недоступно в GET-only режиме",
+        reply_markup=reply_markup,
+        disable_web_page_preview=True,
     )
-    body_parts.append(f"Content-Type: {mime_type}\r\n\r\n".encode("utf-8"))
-    body_parts.append(photo_bytes)
-    body_parts.append(b"\r\n")
-    body_parts.append(f"--{boundary}--\r\n".encode("utf-8"))
-    body = b"".join(body_parts)
-
-    req = urllib_request.Request(
-        f"https://api.telegram.org/bot{bot_token}/sendPhoto",
-        data=body,
-        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
-        method="POST",
-    )
-    try:
-        with urllib_request.urlopen(req, timeout=15) as response:
-            return 200 <= response.status < 300
-    except Exception as exc:
-        logger.warning("Failed to send telegram photo path='%s': %s", photo_path, exc)
-        return False
 
 
 def _send_telegram_photo_url(
@@ -618,18 +580,17 @@ def _send_telegram_photo_url(
     *,
     disable_web_page_preview: bool = True,
 ) -> bool:
-    payload_data: dict[str, Any] = {
+    query_params: dict[str, Any] = {
         "chat_id": chat_id,
         "photo": photo_url,
         "caption": caption,
-        "disable_web_page_preview": disable_web_page_preview,
+        "disable_web_page_preview": str(disable_web_page_preview).lower(),
     }
-    payload = json.dumps(payload_data).encode("utf-8")
+    url = f"https://api.telegram.org/bot{bot_token}/sendPhoto?{urlencode(query_params)}"
     req = urllib_request.Request(
-        f"https://api.telegram.org/bot{bot_token}/sendPhoto",
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
+        url,
+        headers={"Accept": "application/json"},
+        method="GET",
     )
     try:
         with urllib_request.urlopen(req, timeout=15) as response:

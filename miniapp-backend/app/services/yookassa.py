@@ -5,7 +5,7 @@ import json
 from typing import Any
 from urllib import error as urllib_error
 from urllib import request as urllib_request
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 from uuid import uuid4
 
 from app.config import settings
@@ -45,15 +45,16 @@ def _request_json(
     if idempotence_key:
         headers["Idempotence-Key"] = idempotence_key
 
-    data = None
+    url = f"{YOOKASSA_API_BASE}{path}"
     if payload is not None:
-        data = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        query = urlencode({"__body": json.dumps(payload, ensure_ascii=False, separators=(",", ":"))})
+        separator = "&" if "?" in url else "?"
+        url = f"{url}{separator}{query}"
 
     req = urllib_request.Request(
-        url=f"{YOOKASSA_API_BASE}{path}",
-        data=data,
+        url=url,
         headers=headers,
-        method=method.upper(),
+        method="GET",
     )
     try:
         with urllib_request.urlopen(req, timeout=30) as response:
@@ -101,7 +102,7 @@ def create_sbp_payment(
         "metadata": metadata or {},
     }
     return _request_json(
-        "POST",
+        "GET",
         "/payments",
         payload=payload,
         idempotence_key=idempotence_key or uuid4().hex,

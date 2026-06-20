@@ -233,7 +233,7 @@ def trial_settings(db: Session = Depends(get_db)) -> TrialSettingsResponse:
     return TrialSettingsResponse(trial_days=get_trial_days(db))
 
 
-@router.put("/trial-settings", response_model=TrialSettingsResponse)
+@router.get("/trial-settings/update", response_model=TrialSettingsResponse)
 def update_trial_settings(payload: TrialSettingsUpdate, db: Session = Depends(get_db)) -> TrialSettingsResponse:
     updated_days = set_trial_days(db, payload.trial_days)
     return TrialSettingsResponse(trial_days=updated_days)
@@ -244,7 +244,7 @@ def referral_settings(db: Session = Depends(get_db)) -> ReferralSettingsResponse
     return ReferralSettingsResponse(referral_reward_percent=get_referral_reward_percent(db))
 
 
-@router.put("/referral-settings", response_model=ReferralSettingsResponse)
+@router.get("/referral-settings/update", response_model=ReferralSettingsResponse)
 def update_referral_settings(
     payload: ReferralSettingsUpdate,
     db: Session = Depends(get_db),
@@ -259,7 +259,7 @@ def get_miniapp_content(db: Session = Depends(get_db)) -> MiniAppContentResponse
     return _miniapp_content_response(values)
 
 
-@router.put("/miniapp-content", response_model=MiniAppContentResponse)
+@router.get("/miniapp-content/update", response_model=MiniAppContentResponse)
 def update_miniapp_content(payload: MiniAppContentUpdate, db: Session = Depends(get_db)) -> MiniAppContentResponse:
     values = set_miniapp_content_settings(
         db,
@@ -334,7 +334,7 @@ def users(db: Session = Depends(get_db)) -> list[dict]:
     return result
 
 
-@router.post("/users/admins")
+@router.get("/users/admins")
 def add_admin_user(payload: AdminUserCreate, db: Session = Depends(get_db)) -> dict:
     user = get_or_create_user(
         db,
@@ -356,7 +356,7 @@ def add_admin_user(payload: AdminUserCreate, db: Session = Depends(get_db)) -> d
     }
 
 
-@router.put("/users/{user_id}/admin")
+@router.get("/users/{user_id}/admin")
 def update_user_admin(user_id: int, payload: AdminUserUpdate, db: Session = Depends(get_db)) -> dict:
     user = db.get(User, user_id)
     if not user:
@@ -403,7 +403,7 @@ def monitorings(db: Session = Depends(get_db)) -> list[dict]:
     return result
 
 
-@router.put("/monitorings/{monitoring_id}")
+@router.get("/monitorings/{monitoring_id}/update")
 def update_monitoring(monitoring_id: int, payload: MonitoringAdminUpdate, db: Session = Depends(get_db)) -> dict:
     monitoring = db.get(Monitoring, monitoring_id)
     if not monitoring:
@@ -491,7 +491,7 @@ def list_bots(db: Session = Depends(get_db)) -> list[TelegramBotResponse]:
     return [_bot_to_schema(bot) for bot in bots]
 
 
-@router.post("/bots", response_model=TelegramBotResponse)
+@router.get("/bots/create", response_model=TelegramBotResponse)
 def create_bot(payload: TelegramBotCreate, db: Session = Depends(get_db)) -> TelegramBotResponse:
     existing_name = db.scalar(select(TelegramBot).where(TelegramBot.name == payload.name))
     if existing_name:
@@ -518,7 +518,7 @@ def create_bot(payload: TelegramBotCreate, db: Session = Depends(get_db)) -> Tel
     return _bot_to_schema(bot)
 
 
-@router.put("/bots/{bot_id}", response_model=TelegramBotResponse)
+@router.get("/bots/{bot_id}/update", response_model=TelegramBotResponse)
 def update_bot(bot_id: int, payload: TelegramBotUpdate, db: Session = Depends(get_db)) -> TelegramBotResponse:
     bot = db.get(TelegramBot, bot_id)
     if not bot:
@@ -565,7 +565,7 @@ def update_bot(bot_id: int, payload: TelegramBotUpdate, db: Session = Depends(ge
     return _bot_to_schema(bot)
 
 
-@router.delete("/bots/{bot_id}")
+@router.get("/bots/{bot_id}/delete")
 def delete_bot(bot_id: int, db: Session = Depends(get_db)) -> dict:
     bot = db.get(TelegramBot, bot_id)
     if not bot:
@@ -584,7 +584,7 @@ def list_plans(db: Session = Depends(get_db)) -> list[TariffPlan]:
     return list(db.scalars(select(TariffPlan).order_by(TariffPlan.id.asc())))
 
 
-@router.post("/plans", response_model=TariffPlanResponse)
+@router.get("/plans/create", response_model=TariffPlanResponse)
 def create_plan(payload: TariffPlanCreate, db: Session = Depends(get_db)) -> TariffPlan:
     payload_data = payload.model_dump()
     payload_data["plan_format"] = _normalize_plan_format(payload_data.get("plan_format"))
@@ -596,7 +596,7 @@ def create_plan(payload: TariffPlanCreate, db: Session = Depends(get_db)) -> Tar
     return plan
 
 
-@router.put("/plans/{plan_id}", response_model=TariffPlanResponse)
+@router.get("/plans/{plan_id}/update", response_model=TariffPlanResponse)
 def update_plan(plan_id: int, payload: TariffPlanUpdate, db: Session = Depends(get_db)) -> TariffPlan:
     plan = db.get(TariffPlan, plan_id)
     if not plan:
@@ -624,7 +624,7 @@ def update_plan(plan_id: int, payload: TariffPlanUpdate, db: Session = Depends(g
     return plan
 
 
-@router.delete("/plans/{plan_id}")
+@router.get("/plans/{plan_id}/delete")
 def delete_plan(plan_id: int, db: Session = Depends(get_db)) -> dict:
     plan = db.get(TariffPlan, plan_id)
     if not plan:
@@ -679,7 +679,7 @@ def promo_code_stats(
     )
 
 
-@router.post("/promo-codes", response_model=PromoCodeResponse)
+@router.get("/promo-codes/create", response_model=PromoCodeResponse)
 def create_promo_code(payload: PromoCodeCreate, db: Session = Depends(get_db)) -> PromoCode:
     payload_data = _normalize_promo_payload(payload.model_dump())
     existing = db.scalar(select(PromoCode).where(PromoCode.code == payload_data["code"]))
@@ -693,7 +693,7 @@ def create_promo_code(payload: PromoCodeCreate, db: Session = Depends(get_db)) -
     return promo_code
 
 
-@router.put("/promo-codes/{promo_code_id}", response_model=PromoCodeResponse)
+@router.get("/promo-codes/{promo_code_id}/update", response_model=PromoCodeResponse)
 def update_promo_code(promo_code_id: int, payload: PromoCodeUpdate, db: Session = Depends(get_db)) -> PromoCode:
     promo_code = db.get(PromoCode, promo_code_id)
     if not promo_code:
@@ -720,7 +720,7 @@ def update_promo_code(promo_code_id: int, payload: PromoCodeUpdate, db: Session 
     return promo_code
 
 
-@router.delete("/promo-codes/{promo_code_id}")
+@router.get("/promo-codes/{promo_code_id}/delete")
 def delete_promo_code(promo_code_id: int, db: Session = Depends(get_db)) -> dict:
     promo_code = db.get(PromoCode, promo_code_id)
     if not promo_code:
@@ -742,7 +742,7 @@ def list_proxies(db: Session = Depends(get_db)) -> list[ProxyConfig]:
     )
 
 
-@router.post("/proxies", response_model=ProxyResponse)
+@router.get("/proxies/create", response_model=ProxyResponse)
 def create_proxy(payload: ProxyCreate, db: Session = Depends(get_db)) -> ProxyConfig:
     normalized_name = (payload.name or "").strip() or _build_auto_proxy_name(db)
     if normalized_name.startswith("env-proxy-"):
@@ -764,7 +764,7 @@ def create_proxy(payload: ProxyCreate, db: Session = Depends(get_db)) -> ProxyCo
     return proxy
 
 
-@router.put("/proxies/{proxy_id}", response_model=ProxyResponse)
+@router.get("/proxies/{proxy_id}/update", response_model=ProxyResponse)
 def update_proxy(proxy_id: int, payload: ProxyUpdate, db: Session = Depends(get_db)) -> ProxyConfig:
     proxy = db.get(ProxyConfig, proxy_id)
     if not proxy:
@@ -793,7 +793,7 @@ def update_proxy(proxy_id: int, payload: ProxyUpdate, db: Session = Depends(get_
     return proxy
 
 
-@router.delete("/proxies/{proxy_id}")
+@router.get("/proxies/{proxy_id}/delete")
 def delete_proxy(proxy_id: int, db: Session = Depends(get_db)) -> dict:
     proxy = db.get(ProxyConfig, proxy_id)
     if not proxy:
@@ -810,7 +810,7 @@ def list_payments(db: Session = Depends(get_db)) -> list[Payment]:
     return list(db.scalars(select(Payment).order_by(desc(Payment.created_at))))
 
 
-@router.post("/payments", response_model=PaymentResponse)
+@router.get("/payments/create", response_model=PaymentResponse)
 def create_payment(payload: PaymentCreate, db: Session = Depends(get_db)) -> Payment:
     user = get_or_create_user(db, payload.telegram_id, username=None, full_name=None)
     payment = Payment(
@@ -826,7 +826,7 @@ def create_payment(payload: PaymentCreate, db: Session = Depends(get_db)) -> Pay
     return payment
 
 
-@router.post("/subscriptions/activate")
+@router.get("/subscriptions/activate")
 def activate_subscription(payload: ActivateSubscriptionRequest, db: Session = Depends(get_db)) -> dict:
     user = get_or_create_user(db, payload.telegram_id, username=None, full_name=None)
     plan = db.get(TariffPlan, payload.plan_id)
@@ -886,7 +886,7 @@ def _extend_active_subscriptions(db: Session, user_id: int, days: int) -> int:
     return len(subs)
 
 
-@router.post("/subscriptions/grant-days-all", response_model=GrantBonusDaysResponse)
+@router.get("/subscriptions/grant-days-all", response_model=GrantBonusDaysResponse)
 def grant_bonus_days_all(payload: GrantBonusDaysAllRequest, db: Session = Depends(get_db)) -> GrantBonusDaysResponse:
     days = int(payload.days)
     user_ids = [
@@ -918,7 +918,7 @@ def grant_bonus_days_all(payload: GrantBonusDaysAllRequest, db: Session = Depend
     )
 
 
-@router.post("/subscriptions/grant-days-user", response_model=GrantBonusDaysResponse)
+@router.get("/subscriptions/grant-days-user", response_model=GrantBonusDaysResponse)
 def grant_bonus_days_user(payload: GrantBonusDaysUserRequest, db: Session = Depends(get_db)) -> GrantBonusDaysResponse:
     days = int(payload.days)
     user = db.scalar(select(User).where(User.telegram_id == int(payload.telegram_id)))
@@ -949,7 +949,7 @@ def grant_bonus_days_user(payload: GrantBonusDaysUserRequest, db: Session = Depe
     )
 
 
-@router.post("/broadcast", response_model=BroadcastResponse)
+@router.get("/broadcast", response_model=BroadcastResponse)
 def broadcast(payload: BroadcastRequest, db: Session = Depends(get_db)) -> BroadcastResponse:
     photo_url = (payload.photo_url or "").strip() or None
     result = broadcast_to_all_users(db, payload.text.strip(), photo_url)

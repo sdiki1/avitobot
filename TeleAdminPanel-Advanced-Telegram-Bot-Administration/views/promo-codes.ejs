@@ -12,7 +12,7 @@
   <% } %>
 
   <h2>Добавить промокод</h2>
-  <form class="form-grid" action="<%= adminBase %>/promo-codes" method="post">
+  <form class="form-grid" action="<%= adminBase %>/promo-codes/create" method="get">
     <input name="code" placeholder="PROMO10" required />
     <input name="local_name" placeholder="Локальное название (необязательно)" />
     <select name="discount_type" required>
@@ -60,7 +60,7 @@
             </span>
           </td>
           <td>
-            <form class="form-grid two" action="<%= adminBase %>/promo-codes/<%= promo.id %>/update" method="post">
+            <form class="form-grid two" action="<%= adminBase %>/promo-codes/<%= promo.id %>/update" method="get">
               <input name="code" value="<%= promo.code %>" required />
               <input name="local_name" value="<%= promo.local_name || '' %>" placeholder="Локальное название" />
               <select name="discount_type" required>
@@ -74,7 +74,7 @@
               <button type="submit">Сохранить</button>
             </form>
             <a class="button" href="<%= adminBase %>/promo-codes/<%= promo.id %>/stats">Статистика</a>
-            <form action="<%= adminBase %>/promo-codes/<%= promo.id %>/delete" method="post">
+            <form action="<%= adminBase %>/promo-codes/<%= promo.id %>/delete" method="get">
               <button class="danger" type="submit">Удалить</button>
             </form>
           </td>
