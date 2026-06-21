@@ -10,7 +10,7 @@ import re
 from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 import redis.asyncio as aioredis
@@ -280,11 +280,34 @@ def _looks_like_url(value: str) -> bool:
     return lowered.startswith("http://") or lowered.startswith("https://")
 
 
-_AVITO_HOST_RE = re.compile(r"^https?://(www\.)?avito\.(ru|com)(/|$|\?|#)", re.IGNORECASE)
+_AVITO_HOST_RE = re.compile(r"^https?://((www|m)\.)?avito\.(ru|com)(/|$|\?|#)", re.IGNORECASE)
 
 
 def _is_avito_url(value: str) -> bool:
     return bool(_AVITO_HOST_RE.match(value.strip()))
+
+
+def _normalize_avito_url(value: str) -> str:
+    raw = value.strip()
+    if not raw:
+        return raw
+
+    try:
+        parsed = urlsplit(raw)
+    except Exception:
+        return raw
+
+    netloc = parsed.netloc or ""
+    lower_netloc = netloc.lower()
+    for domain in ("avito.ru", "avito.com"):
+        mobile_domain = f"m.{domain}"
+        if lower_netloc == mobile_domain:
+            return urlunsplit((parsed.scheme, f"www.{domain}", parsed.path, parsed.query, parsed.fragment))
+        if lower_netloc.startswith(f"{mobile_domain}:"):
+            replaced_netloc = f"www.{domain}" + netloc[len(mobile_domain) :]
+            return urlunsplit((parsed.scheme, replaced_netloc, parsed.path, parsed.query, parsed.fragment))
+
+    return raw
 
 
 _LINK_ERROR_TEXT = "Нужна ссылка на Avito: формат https://avito.ru/..."
@@ -1109,7 +1132,7 @@ def build_router(bot_id: int, backend: BackendAPI, *, is_primary: bool = False) 
             )
             return
         await state.clear()
-        await _apply_change_link(message, url)
+        await _apply_change_link(message, _normalize_avito_url(url))
 
     @router.message(LinkChangeState.waiting_url)
     async def on_change_link_input(message: Message, state: FSMContext) -> None:
@@ -1133,7 +1156,7 @@ def build_router(bot_id: int, backend: BackendAPI, *, is_primary: bool = False) 
             return
 
         await state.clear()
-        await _apply_change_link(message, value)
+        await _apply_change_link(message, _normalize_avito_url(value))
 
     @router.message(F.text == BTN_STATUS)
     async def btn_status(message: Message) -> None:

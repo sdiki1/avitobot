@@ -47,7 +47,7 @@ export default function App() {
   const [agreedToPrivacy, setAgreedToPrivacy] = useState(false)
   const [buyDraft, setBuyDraft] = useState({ title: '', url: '' })
   const [buyTargetMonitoringId, setBuyTargetMonitoringId] = useState(null)
-  const [allSubscriptionsExpanded, setAllSubscriptionsExpanded] = useState(true)
+  const [allSubscriptionsExpanded, setAllSubscriptionsExpanded] = useState(false)
 
   useEffect(() => {
     if (window.Telegram && window.Telegram.WebApp) {
