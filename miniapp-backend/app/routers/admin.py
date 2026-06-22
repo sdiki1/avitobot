@@ -396,6 +396,7 @@ def monitorings(db: Session = Depends(get_db)) -> list[dict]:
                 "include_description": row.include_description,
                 "include_seller_info": row.include_seller_info,
                 "notify_price_drop": row.notify_price_drop,
+                "detect_repost": row.detect_repost,
                 "last_checked_at": row.last_checked_at,
                 "created_at": row.created_at,
             }
@@ -461,6 +462,8 @@ def update_monitoring(monitoring_id: int, payload: MonitoringAdminUpdate, db: Se
         monitoring.include_seller_info = payload.include_seller_info
     if payload.notify_price_drop is not None:
         monitoring.notify_price_drop = payload.notify_price_drop
+    if payload.detect_repost is not None:
+        monitoring.detect_repost = payload.detect_repost
 
     db.commit()
     db.refresh(monitoring)
@@ -480,6 +483,7 @@ def update_monitoring(monitoring_id: int, payload: MonitoringAdminUpdate, db: Se
         "include_description": monitoring.include_description,
         "include_seller_info": monitoring.include_seller_info,
         "notify_price_drop": monitoring.notify_price_drop,
+        "detect_repost": monitoring.detect_repost,
         "last_checked_at": monitoring.last_checked_at,
         "created_at": monitoring.created_at,
     }

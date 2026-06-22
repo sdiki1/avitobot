@@ -146,6 +146,7 @@ class Monitoring(Base):
     include_description: Mapped[bool] = mapped_column(Boolean, default=True)
     include_seller_info: Mapped[bool] = mapped_column(Boolean, default=True)
     notify_price_drop: Mapped[bool] = mapped_column(Boolean, default=True)
+    detect_repost: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

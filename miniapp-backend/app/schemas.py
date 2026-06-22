@@ -157,6 +157,7 @@ class MonitoringCreate(BaseModel):
     include_description: bool = True
     include_seller_info: bool = True
     notify_price_drop: bool = True
+    detect_repost: bool = True
 
 
 class MonitoringUpdate(BaseModel):
@@ -168,6 +169,7 @@ class MonitoringUpdate(BaseModel):
     include_description: bool | None = None
     include_seller_info: bool | None = None
     notify_price_drop: bool | None = None
+    detect_repost: bool | None = None
 
 
 class MonitoringPurchaseRequest(BaseModel):
@@ -191,6 +193,7 @@ class MonitoringResponse(BaseModel):
     include_description: bool = True
     include_seller_info: bool = True
     notify_price_drop: bool = True
+    detect_repost: bool = True
     last_checked_at: datetime | None = None
     bot: BotReference | None = None
     subscription_ends_at: datetime | None = None
@@ -494,3 +497,4 @@ class MonitoringAdminUpdate(BaseModel):
     include_description: bool | None = None
     include_seller_info: bool | None = None
     notify_price_drop: bool | None = None
+    detect_repost: bool | None = None

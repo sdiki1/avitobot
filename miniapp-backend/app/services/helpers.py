@@ -1293,6 +1293,24 @@ def _build_published_at_block(published_at: datetime | None) -> str:
     return f"\n\n🕒 {html.escape(_format_published_at_line(published_at))}"
 
 
+def _is_repost_by_published_at(published_at: datetime | None) -> bool:
+    if not published_at:
+        return False
+    try:
+        normalized = published_at
+        if normalized.tzinfo is None:
+            normalized = normalized.replace(tzinfo=timezone.utc)
+        return now_utc() - normalized.astimezone(timezone.utc) > timedelta(minutes=10)
+    except Exception:
+        return False
+
+
+def _build_repost_badge(mark_repost: bool, published_at: datetime | None) -> str:
+    if not mark_repost or not _is_repost_by_published_at(published_at):
+        return ""
+    return "🔁 <b>Повторное размещение</b>\n"
+
+
 def format_new_item_message(
     title: str,
     price_rub: int | None,
@@ -1304,12 +1322,14 @@ def format_new_item_message(
     raw_json: dict[str, Any] | None = None,
     include_description: bool = True,
     include_seller_info: bool = True,
+    mark_repost: bool = False,
 ) -> str:
     price_line = html.escape(_format_price_line(price_rub))
     location_line = html.escape(location or "Локация не указана")
     title_line = html.escape(_cleanup_text(title, 160) or "Без названия")
     item_url = html.escape(_build_short_avito_url(url, avito_ad_id))
     return (
+        f"{_build_repost_badge(mark_repost, published_at)}"
         f"<b>{title_line}</b>\n"
         f"💰 {price_line}\n"
         f"📍 {location_line}\n"

@@ -408,6 +408,7 @@ def save_scan_result(monitoring_id: int, payload: InternalScanPayload, db: Sessi
                     raw_json=db_item.raw_json,
                     include_description=monitoring.include_description,
                     include_seller_info=monitoring.include_seller_info,
+                    mark_repost=monitoring.detect_repost,
                 ),
                 status="pending",
             )

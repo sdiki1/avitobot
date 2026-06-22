@@ -116,6 +116,7 @@ def init_db() -> None:
         conn.exec_driver_sql("ALTER TABLE monitorings ADD COLUMN IF NOT EXISTS include_description BOOLEAN DEFAULT TRUE")
         conn.exec_driver_sql("ALTER TABLE monitorings ADD COLUMN IF NOT EXISTS include_seller_info BOOLEAN DEFAULT TRUE")
         conn.exec_driver_sql("ALTER TABLE monitorings ADD COLUMN IF NOT EXISTS notify_price_drop BOOLEAN DEFAULT TRUE")
+        conn.exec_driver_sql("ALTER TABLE monitorings ADD COLUMN IF NOT EXISTS detect_repost BOOLEAN DEFAULT TRUE")
         conn.exec_driver_sql("ALTER TABLE monitorings ADD COLUMN IF NOT EXISTS notify_since_at TIMESTAMP WITH TIME ZONE")
         conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_monitorings_bot_id ON monitorings (bot_id)")
         conn.exec_driver_sql(
@@ -131,6 +132,7 @@ def init_db() -> None:
         conn.exec_driver_sql("UPDATE monitorings SET include_description = TRUE WHERE include_description IS NULL")
         conn.exec_driver_sql("UPDATE monitorings SET include_seller_info = TRUE WHERE include_seller_info IS NULL")
         conn.exec_driver_sql("UPDATE monitorings SET notify_price_drop = TRUE WHERE notify_price_drop IS NULL")
+        conn.exec_driver_sql("UPDATE monitorings SET detect_repost = TRUE WHERE detect_repost IS NULL")
 
         conn.exec_driver_sql("ALTER TABLE telegram_bots ADD COLUMN IF NOT EXISTS is_primary BOOLEAN DEFAULT FALSE")
         conn.exec_driver_sql("UPDATE telegram_bots SET is_primary = FALSE WHERE is_primary IS NULL")

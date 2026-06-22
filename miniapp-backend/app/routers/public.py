@@ -100,6 +100,7 @@ def _monitoring_to_schema(mon: Monitoring, sub_info: dict | None = None) -> Moni
         include_description=mon.include_description,
         include_seller_info=mon.include_seller_info,
         notify_price_drop=mon.notify_price_drop,
+        detect_repost=mon.detect_repost,
         last_checked_at=mon.last_checked_at,
         bot=_to_bot_ref(mon.bot),
         subscription_ends_at=sub_info.get("subscription_ends_at"),
@@ -843,6 +844,7 @@ def create_monitoring(
         include_description=payload.include_description,
         include_seller_info=payload.include_seller_info,
         notify_price_drop=payload.notify_price_drop,
+        detect_repost=payload.detect_repost,
     )
     db.add(monitoring)
     db.commit()
@@ -870,6 +872,7 @@ def update_monitoring(
     prev_include_description = bool(monitoring.include_description)
     prev_include_seller_info = bool(monitoring.include_seller_info)
     prev_notify_price_drop = bool(monitoring.notify_price_drop)
+    prev_detect_repost = bool(monitoring.detect_repost)
     link_changed = False
     started_from_miniapp = False
 
@@ -903,6 +906,8 @@ def update_monitoring(
         monitoring.include_seller_info = payload.include_seller_info
     if payload.notify_price_drop is not None:
         monitoring.notify_price_drop = payload.notify_price_drop
+    if payload.detect_repost is not None:
+        monitoring.detect_repost = payload.detect_repost
 
     db.commit()
     db.refresh(monitoring)
@@ -913,6 +918,7 @@ def update_monitoring(
             payload.include_description is not None and bool(payload.include_description) != prev_include_description,
             payload.include_seller_info is not None and bool(payload.include_seller_info) != prev_include_seller_info,
             payload.notify_price_drop is not None and bool(payload.notify_price_drop) != prev_notify_price_drop,
+            payload.detect_repost is not None and bool(payload.detect_repost) != prev_detect_repost,
         ]
     )
     clear_pending_notifications = settings_changed or started_from_miniapp

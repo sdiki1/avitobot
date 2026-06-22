@@ -270,6 +270,7 @@ export async function persistMonitoringSettingsAction({
     include_description: Boolean(flags?.description),
     include_seller_info: Boolean(flags?.seller),
     notify_price_drop: Boolean(flags?.price_drop),
+    detect_repost: Boolean(flags?.repost),
     ...extraPatch,
   })
   applyMonitoringUpdateToState(updated)

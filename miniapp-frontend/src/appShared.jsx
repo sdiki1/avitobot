@@ -20,6 +20,7 @@ export const PARAM_OPTIONS = [
   { key: 'description', label: 'Описание' },
   { key: 'seller', label: 'Информация о продавце' },
   { key: 'price_drop', label: 'Снижение цены' },
+  { key: 'repost', label: 'Повторное размещение' },
 ]
 
 export const DEFAULT_PARAM_FLAGS = {
@@ -27,6 +28,7 @@ export const DEFAULT_PARAM_FLAGS = {
   description: true,
   seller: true,
   price_drop: true,
+  repost: true,
 }
 
 export const DEFAULT_MINIAPP_CONTENT = {
@@ -184,6 +186,7 @@ export function normalizeParamFlags(monitoring) {
     description: monitoring?.include_description ?? true,
     seller: monitoring?.include_seller_info ?? true,
     price_drop: monitoring?.notify_price_drop ?? true,
+    repost: monitoring?.detect_repost ?? true,
   }
 }
 
@@ -213,5 +216,6 @@ export function hasMonitoringSettingsChanges(monitoring, draft, flags) {
   if (Boolean(flags?.description) !== Boolean(monitoring.include_description)) return true
   if (Boolean(flags?.seller) !== Boolean(monitoring.include_seller_info)) return true
   if (Boolean(flags?.price_drop) !== Boolean(monitoring.notify_price_drop)) return true
+  if (Boolean(flags?.repost) !== Boolean(monitoring.detect_repost)) return true
   return false
 }

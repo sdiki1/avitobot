@@ -458,6 +458,7 @@ router.get('/monitorings/:id/update', async (req, res) => {
       include_description: req.body.include_description === 'on',
       include_seller_info: req.body.include_seller_info === 'on',
       notify_price_drop: req.body.notify_price_drop === 'on',
+      detect_repost: req.body.detect_repost === 'on',
     };
     if (Object.prototype.hasOwnProperty.call(req.body, 'bot_id')) {
       payload.bot_id = toInt(req.body.bot_id) || 0;
