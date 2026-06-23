@@ -1191,6 +1191,13 @@ def purchase_subscription(
     payment_payload["confirmation_url"] = confirmation_url or None
     payment.payload = payment_payload
 
+    if yookassa_status not in {"canceled", "succeeded"} and not confirmation_url:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="ЮKassa не вернула ссылку оплаты",
+        )
+
     if yookassa_status == "canceled":
         payment.status = "canceled"
         payment_payload = _refund_referral_if_needed(user, payment_payload)
