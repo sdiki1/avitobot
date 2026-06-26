@@ -31,6 +31,7 @@ from app.schemas import (
 )
 from app.services.helpers import (
     activate_user_subscription,
+    add_days,
     apply_referral_code,
     ensure_subscription_monitoring_slots,
     ensure_user_referral_code,
@@ -436,6 +437,12 @@ def _finalize_subscription_payment(
     plan: TariffPlan,
     payment: Payment,
 ) -> UserSubscription:
+    locked_payment = db.scalar(
+        select(Payment).where(Payment.id == payment.id).with_for_update()
+    )
+    if locked_payment:
+        payment = locked_payment
+
     payload = _payment_payload(payment)
     existing_subscription_id = _safe_int(payload.get("subscription_id"), 0)
     if bool(payload.get("finalized")) and existing_subscription_id > 0:
@@ -463,13 +470,42 @@ def _finalize_subscription_payment(
     if bool(payload.get("create_new_monitoring")):
         target_total_slots = max(target_total_slots, int(current_total_slots) + 1)
 
-    subscription = activate_user_subscription(
-        db,
-        user.id,
-        plan,
-        amount_paid_override=amount_to_pay,
-        is_trial=False,
-    )
+    subscription = None
+    monitoring_id = _safe_int(payload.get("monitoring_id"), 0)
+    if monitoring_id > 0:
+        subscription_info = get_monitoring_subscription_map(db, user.id).get(monitoring_id) or {}
+        renewal_subscription_id = _safe_int(subscription_info.get("subscription_id"), 0)
+        if renewal_subscription_id > 0:
+            subscription = db.get(UserSubscription, renewal_subscription_id)
+
+    if subscription:
+        renewal_started_at = now_utc()
+        comparison_now = renewal_started_at
+        if subscription.ends_at.tzinfo is None and comparison_now.tzinfo is not None:
+            comparison_now = comparison_now.replace(tzinfo=None)
+        elif subscription.ends_at.tzinfo is not None and comparison_now.tzinfo is None:
+            comparison_now = comparison_now.replace(tzinfo=subscription.ends_at.tzinfo)
+        if subscription.ends_at > comparison_now:
+            renewal_started_at = subscription.ends_at
+        subscription.plan_id = plan.id
+        subscription.status = "active"
+        subscription.is_trial = False
+        subscription.amount_paid = max(0, int(subscription.amount_paid or 0)) + amount_to_pay
+        subscription.ends_at = add_days(renewal_started_at, int(plan.duration_days))
+        db.flush()
+    else:
+        started_at = now_utc()
+        subscription = UserSubscription(
+            user_id=user.id,
+            plan_id=plan.id,
+            status="active",
+            is_trial=False,
+            amount_paid=amount_to_pay,
+            started_at=started_at,
+            ends_at=add_days(started_at, int(plan.duration_days)),
+        )
+        db.add(subscription)
+        db.flush()
     _apply_monitoring_purchase_payload(db, user, payload, target_total_slots)
 
     reward = reward_referrer_for_payment(db, user, amount_to_pay)
@@ -1420,7 +1456,7 @@ def subscription_purchase_status(
     )
 
 
-@webhook_router.get("/webhooks")
+@webhook_router.post("/webhooks")
 def yookassa_webhook(payload: dict, db: Session = Depends(get_db)) -> dict:
     event = str(payload.get("event") or "").strip().lower()
     obj = payload.get("object")
