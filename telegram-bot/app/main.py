@@ -10,7 +10,7 @@ import re
 from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urlsplit
 
 import httpx
 import redis.asyncio as aioredis
@@ -280,34 +280,11 @@ def _looks_like_url(value: str) -> bool:
     return lowered.startswith("http://") or lowered.startswith("https://")
 
 
-_AVITO_HOST_RE = re.compile(r"^https?://((www|m)\.)?avito\.(ru|com)(/|$|\?|#)", re.IGNORECASE)
+_AVITO_HOST_RE = re.compile(r"^https?://(www\.)?avito\.(ru|com)(/|$|\?|#)", re.IGNORECASE)
 
 
 def _is_avito_url(value: str) -> bool:
     return bool(_AVITO_HOST_RE.match(value.strip()))
-
-
-def _normalize_avito_url(value: str) -> str:
-    raw = value.strip()
-    if not raw:
-        return raw
-
-    try:
-        parsed = urlsplit(raw)
-    except Exception:
-        return raw
-
-    netloc = parsed.netloc or ""
-    lower_netloc = netloc.lower()
-    for domain in ("avito.ru", "avito.com"):
-        mobile_domain = f"m.{domain}"
-        if lower_netloc == mobile_domain:
-            return urlunsplit((parsed.scheme, f"www.{domain}", parsed.path, parsed.query, parsed.fragment))
-        if lower_netloc.startswith(f"{mobile_domain}:"):
-            replaced_netloc = f"www.{domain}" + netloc[len(mobile_domain) :]
-            return urlunsplit((parsed.scheme, replaced_netloc, parsed.path, parsed.query, parsed.fragment))
-
-    return raw
 
 
 _LINK_ERROR_TEXT = "Нужна ссылка на Avito: формат https://avito.ru/..."
@@ -717,15 +694,6 @@ class BackendAPI:
     async def close(self) -> None:
         await self.client.aclose()
 
-    async def get_with_payload(
-        self,
-        url: str,
-        payload: dict[str, Any] | None = None,
-        headers: dict[str, str] | None = None,
-    ) -> httpx.Response:
-        params = {"__body": json.dumps(payload)} if payload is not None else None
-        return await self.client.get(url, params=params, headers=headers)
-
     async def auth_user(
         self,
         telegram_id: int,
@@ -739,7 +707,7 @@ class BackendAPI:
             "full_name": full_name,
             "referral_code": referral_code,
         }
-        response = await self.get_with_payload(f"{BACKEND_URL}/api/v1/public/auth/telegram", payload)
+        response = await self.client.post(f"{BACKEND_URL}/api/v1/public/auth/telegram", json=payload)
         response.raise_for_status()
         return response.json()
 
@@ -768,9 +736,9 @@ class BackendAPI:
         return payload if isinstance(payload, dict) else {}
 
     async def onboarding_trial(self, telegram_id: int) -> dict[str, Any]:
-        response = await self.get_with_payload(
+        response = await self.client.post(
             f"{BACKEND_URL}/api/v1/public/onboarding-trial",
-            {"telegram_id": telegram_id},
+            json={"telegram_id": telegram_id},
         )
         response.raise_for_status()
         payload = response.json()
@@ -790,9 +758,9 @@ class BackendAPI:
             "telegram_bot_id": telegram_bot_id,
             "bot_username": bot_username,
         }
-        response = await self.get_with_payload(
+        response = await self.client.post(
             f"{BACKEND_URL}/api/v1/internal/bots/{bot_id}/sync",
-            payload,
+            json=payload,
             headers={"X-Internal-Token": INTERNAL_API_TOKEN},
         )
         response.raise_for_status()
@@ -807,27 +775,27 @@ class BackendAPI:
 
     async def start_monitoring(self, bot_id: int, telegram_id: int) -> tuple[int, dict[str, Any]]:
         payload = {"telegram_id": telegram_id, "bot_id": bot_id}
-        response = await self.get_with_payload(
+        response = await self.client.post(
             f"{BACKEND_URL}/api/v1/internal/bot-monitoring/start",
-            payload,
+            json=payload,
             headers={"X-Internal-Token": INTERNAL_API_TOKEN},
         )
         return response.status_code, _response_json(response)
 
     async def stop_monitoring(self, bot_id: int, telegram_id: int) -> tuple[int, dict[str, Any]]:
         payload = {"telegram_id": telegram_id, "bot_id": bot_id}
-        response = await self.get_with_payload(
+        response = await self.client.post(
             f"{BACKEND_URL}/api/v1/internal/bot-monitoring/stop",
-            payload,
+            json=payload,
             headers={"X-Internal-Token": INTERNAL_API_TOKEN},
         )
         return response.status_code, _response_json(response)
 
     async def change_link(self, bot_id: int, telegram_id: int, url: str) -> tuple[int, dict[str, Any]]:
         payload = {"telegram_id": telegram_id, "bot_id": bot_id, "url": url}
-        response = await self.get_with_payload(
+        response = await self.client.post(
             f"{BACKEND_URL}/api/v1/internal/bot-monitoring/change-link",
-            payload,
+            json=payload,
             headers={"X-Internal-Token": INTERNAL_API_TOKEN},
         )
         return response.status_code, _response_json(response)
@@ -850,7 +818,7 @@ class BackendAPI:
         return payload if isinstance(payload, list) else []
 
     async def mark_notification_sent(self, notification_id: int) -> None:
-        response = await self.get_with_payload(
+        response = await self.client.post(
             f"{BACKEND_URL}/api/v1/internal/notifications/{notification_id}/sent",
             headers={"X-Internal-Token": INTERNAL_API_TOKEN},
         )
@@ -859,9 +827,9 @@ class BackendAPI:
     async def mark_notifications_sent(self, notification_ids: list[int]) -> None:
         if not notification_ids:
             return
-        response = await self.get_with_payload(
+        response = await self.client.post(
             f"{BACKEND_URL}/api/v1/internal/notifications/sent-batch",
-            {"notification_ids": notification_ids},
+            json={"notification_ids": notification_ids},
             headers={"X-Internal-Token": INTERNAL_API_TOKEN},
         )
         response.raise_for_status()
@@ -1132,7 +1100,7 @@ def build_router(bot_id: int, backend: BackendAPI, *, is_primary: bool = False) 
             )
             return
         await state.clear()
-        await _apply_change_link(message, _normalize_avito_url(url))
+        await _apply_change_link(message, url)
 
     @router.message(LinkChangeState.waiting_url)
     async def on_change_link_input(message: Message, state: FSMContext) -> None:
@@ -1156,7 +1124,7 @@ def build_router(bot_id: int, backend: BackendAPI, *, is_primary: bool = False) 
             return
 
         await state.clear()
-        await _apply_change_link(message, _normalize_avito_url(value))
+        await _apply_change_link(message, value)
 
     @router.message(F.text == BTN_STATUS)
     async def btn_status(message: Message) -> None:
