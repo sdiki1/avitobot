@@ -70,6 +70,8 @@ exports.deleteBot = (id) => request(`/bots/${id}/delete`);
 
 exports.getPayments = () => request('/payments');
 exports.createPayment = (payload) => request('/payments/create', withPayload(payload));
+exports.getPaymentSettings = () => request('/payment-settings');
+exports.updatePaymentSettings = (payload) => request('/payment-settings/update', withPayload(payload));
 exports.activateSubscription = (payload) =>
   request('/subscriptions/activate', withPayload(payload));
 exports.grantBonusDaysAll = (payload) =>

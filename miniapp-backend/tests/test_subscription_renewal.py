@@ -29,8 +29,17 @@ except ModuleNotFoundError:
 
 from app.database import Base
 from app.models import Monitoring, Payment, TariffPlan, TelegramBot, User, UserSubscription
-from app.routers.public import _finalize_subscription_payment
-from app.services.helpers import get_monitoring_subscription_map, now_utc
+from app.routers.public import (
+    _finalize_subscription_payment,
+    purchase_subscription,
+    subscription_purchase_status,
+)
+from app.schemas import PurchaseSubscriptionRequest
+from app.services.helpers import (
+    get_monitoring_subscription_map,
+    now_utc,
+    set_test_payment_enabled,
+)
 
 
 class SubscriptionRenewalTest(unittest.TestCase):
@@ -200,6 +209,39 @@ class SubscriptionRenewalTest(unittest.TestCase):
 
         self.assertIsNotNone(monitoring)
         self.assertEqual(monitoring.bot_id, self.first_worker.id)
+
+    def test_test_payment_is_confirmed_on_first_status_check(self) -> None:
+        set_test_payment_enabled(self.db, True)
+        purchase = purchase_subscription(
+            payload=PurchaseSubscriptionRequest(
+                telegram_id=self.user.telegram_id,
+                plan_id=self.plan.id,
+            ),
+            auth_user=self.user,
+            db=self.db,
+        )
+
+        self.assertTrue(purchase.requires_payment)
+        self.assertEqual(purchase.payment_status, "pending")
+        self.assertTrue(str(purchase.payment_url).startswith("https://payment.invalid/"))
+
+        with (
+            patch("app.routers.public.send_subscription_assigned_bot_message", return_value=True),
+            patch("app.routers.public.send_admin_event_message", return_value=True),
+        ):
+            confirmed = subscription_purchase_status(
+                payment_id=purchase.payment_id,
+                telegram_id=self.user.telegram_id,
+                auth_user=self.user,
+                db=self.db,
+            )
+
+        self.assertFalse(confirmed.requires_payment)
+        self.assertEqual(confirmed.payment_status, "succeeded")
+        self.assertIsNotNone(confirmed.subscription_id)
+        payment = self.db.get(Payment, purchase.payment_id)
+        self.assertEqual(payment.provider, "test_payment")
+        self.assertEqual(payment.payload["test_confirmation_count"], 1)
 
 
 if __name__ == "__main__":

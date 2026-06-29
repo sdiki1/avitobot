@@ -522,10 +522,33 @@ router.get('/bots/:id/delete', async (req, res) => {
 
 router.get('/payments', async (req, res) => {
   try {
-    const [payments, plans, stats] = await Promise.all([api.getPayments(), api.getPlans(), api.getStats()]);
-    res.render('payments', { payments, plans, stats, error: null, success: req.query.success || null });
+    const [payments, plans, stats, paymentSettings] = await Promise.all([
+      api.getPayments(),
+      api.getPlans(),
+      api.getStats(),
+      api.getPaymentSettings(),
+    ]);
+    res.render('payments', { payments, plans, stats, paymentSettings, error: null, success: req.query.success || null });
   } catch (error) {
-    res.render('payments', { payments: [], plans: [], stats: emptyStats(), error: error.message, success: null });
+    res.render('payments', {
+      payments: [],
+      plans: [],
+      stats: emptyStats(),
+      paymentSettings: { test_payment_enabled: false },
+      error: error.message,
+      success: null,
+    });
+  }
+});
+
+router.get('/payment-settings/toggle-test', async (req, res) => {
+  try {
+    const enabled = String(req.body.enabled || '').toLowerCase() === 'true';
+    await api.updatePaymentSettings({ test_payment_enabled: enabled });
+    const message = enabled ? 'Тестовая оплата включена' : 'Тестовая оплата выключена';
+    res.redirect(withAdminBase(`/payments?success=${encodeURIComponent(message)}`));
+  } catch (error) {
+    res.redirect(withAdminBase(`/payments?error=${encodeURIComponent(`Ошибка: ${error.message}`)}`));
   }
 });
 

@@ -20,6 +20,8 @@ from app.schemas import (
     MonitoringAdminUpdate,
     PaymentCreate,
     PaymentResponse,
+    PaymentSettingsResponse,
+    PaymentSettingsUpdate,
     PromoCodeCreate,
     PromoCodeResponse,
     PromoCodeStatsResponse,
@@ -49,6 +51,7 @@ from app.services.helpers import (
     get_miniapp_content_settings,
     get_or_create_user,
     get_trial_days,
+    is_test_payment_enabled,
     maintain_proxy_pool,
     now_utc,
     normalize_monitoring_url,
@@ -59,6 +62,7 @@ from app.services.helpers import (
     send_subscription_assigned_bot_message,
     set_referral_reward_percent,
     set_miniapp_content_settings,
+    set_test_payment_enabled,
     set_trial_days,
     validate_promo_code_value,
 )
@@ -251,6 +255,20 @@ def update_referral_settings(
 ) -> ReferralSettingsResponse:
     updated_percent = set_referral_reward_percent(db, payload.referral_reward_percent)
     return ReferralSettingsResponse(referral_reward_percent=updated_percent)
+
+
+@router.get("/payment-settings", response_model=PaymentSettingsResponse)
+def payment_settings(db: Session = Depends(get_db)) -> PaymentSettingsResponse:
+    return PaymentSettingsResponse(test_payment_enabled=is_test_payment_enabled(db))
+
+
+@router.get("/payment-settings/update", response_model=PaymentSettingsResponse)
+def update_payment_settings(
+    payload: PaymentSettingsUpdate,
+    db: Session = Depends(get_db),
+) -> PaymentSettingsResponse:
+    enabled = set_test_payment_enabled(db, payload.test_payment_enabled)
+    return PaymentSettingsResponse(test_payment_enabled=enabled)
 
 
 @router.get("/miniapp-content", response_model=MiniAppContentResponse)

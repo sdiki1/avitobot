@@ -381,6 +381,14 @@ class ReferralSettingsUpdate(BaseModel):
     referral_reward_percent: int = Field(ge=0, le=100)
 
 
+class PaymentSettingsResponse(BaseModel):
+    test_payment_enabled: bool = False
+
+
+class PaymentSettingsUpdate(BaseModel):
+    test_payment_enabled: bool
+
+
 class MiniAppInfoLink(BaseModel):
     key: str
     title: str

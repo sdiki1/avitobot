@@ -42,6 +42,7 @@ from app.services.helpers import (
     get_active_subscription_query,
     get_available_bot_for_user,
     get_or_create_user,
+    is_test_payment_enabled,
     normalize_monitoring_url,
     normalize_promo_code,
     now_utc,
@@ -1234,6 +1235,37 @@ def purchase_subscription(
             message="Подписка активирована",
         )
 
+    if is_test_payment_enabled(db):
+        payment = Payment(
+            user_id=user.id,
+            plan_id=plan.id,
+            amount_rub=amount_to_pay,
+            status="pending",
+            provider="test_payment",
+            payload=purchase_payload,
+        )
+        db.add(payment)
+        db.flush()
+        payment_payload = _payment_payload(payment)
+        payment_payload["confirmation_url"] = f"https://payment.invalid/test/{payment.id}"
+        payment_payload["test_payment"] = True
+        payment_payload["test_confirmation_count"] = 0
+        payment.payload = payment_payload
+        db.commit()
+        return _build_purchase_response(
+            ok=True,
+            user_id=user.id,
+            plan_id=plan.id,
+            amount_rub=amount_to_pay,
+            referral_used_rub=referral_used,
+            total_price_rub=total_price,
+            payment=payment,
+            requires_payment=True,
+            payment_status="pending",
+            payment_url=payment_payload["confirmation_url"],
+            message="Тестовый платеж создан. Нажмите «Проверить оплату» для подтверждения.",
+        )
+
     if not yookassa_is_configured():
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="ЮKassa не настроена")
 
@@ -1373,6 +1405,33 @@ def subscription_purchase_status(
     amount_to_pay = max(0, _safe_int(payment.amount_rub, 0))
     referral_used = max(0, _safe_int(payment_payload.get("referral_used_rub"), 0))
     total_price = max(amount_to_pay + referral_used, _safe_int(payment_payload.get("total_price_rub"), amount_to_pay + referral_used))
+
+    if payment.provider == "test_payment" and payment.status == "pending":
+        payment_payload["test_confirmation_count"] = max(
+            0, _safe_int(payment_payload.get("test_confirmation_count"), 0)
+        ) + 1
+        payment_payload["yookassa_status"] = "succeeded"
+        payment.payload = payment_payload
+        payment.status = "completed"
+        subscription = _finalize_subscription_payment(
+            db=db,
+            user=user,
+            plan=plan,
+            payment=payment,
+        )
+        return _build_purchase_response(
+            ok=True,
+            user_id=user.id,
+            plan_id=plan.id,
+            amount_rub=amount_to_pay,
+            referral_used_rub=referral_used,
+            total_price_rub=total_price,
+            subscription=subscription,
+            payment=payment,
+            requires_payment=False,
+            payment_status="succeeded",
+            message="Тестовая оплата подтверждена, подписка активирована",
+        )
 
     if payment.provider.startswith("yookassa") and payment.status not in {"completed", "canceled"} and payment.external_id:
         if not yookassa_is_configured():

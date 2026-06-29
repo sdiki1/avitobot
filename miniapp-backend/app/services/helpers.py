@@ -21,6 +21,7 @@ from app.models import AppSetting, Monitoring, ProxyConfig, TariffPlan, Telegram
 logger = logging.getLogger(__name__)
 TRIAL_DAYS_SETTING_KEY = "trial_days"
 REFERRAL_REWARD_PERCENT_SETTING_KEY = "referral_reward_percent"
+TEST_PAYMENT_ENABLED_SETTING_KEY = "test_payment_enabled"
 PROXY_CAPACITY_WARNING_SETTING_KEY = "proxy_capacity_last_warning_signature"
 DEFAULT_TRIAL_DAYS = 3
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -492,6 +493,28 @@ def set_referral_reward_percent(db: Session, reward_percent: int) -> int:
         db.add(setting)
     else:
         setting.value = str(normalized)
+    db.commit()
+    return normalized
+
+
+def is_test_payment_enabled(db: Session) -> bool:
+    setting = db.scalar(select(AppSetting).where(AppSetting.key == TEST_PAYMENT_ENABLED_SETTING_KEY))
+    if not setting:
+        return False
+    return str(setting.value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def set_test_payment_enabled(db: Session, enabled: bool) -> bool:
+    normalized = bool(enabled)
+    setting = db.scalar(select(AppSetting).where(AppSetting.key == TEST_PAYMENT_ENABLED_SETTING_KEY))
+    if not setting:
+        setting = AppSetting(
+            key=TEST_PAYMENT_ENABLED_SETTING_KEY,
+            value="true" if normalized else "false",
+        )
+        db.add(setting)
+    else:
+        setting.value = "true" if normalized else "false"
     db.commit()
     return normalized
 

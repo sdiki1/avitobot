@@ -16,6 +16,29 @@
 </section>
 
 <section class="card">
+  <h2>Режим оплаты</h2>
+  <p class="muted">
+    Тестовый режим создаёт нерабочую ссылку и подтверждает оплату при первом нажатии
+    «Проверить оплату» в MiniApp.
+  </p>
+  <p>
+    <span class="badge <%= paymentSettings?.test_payment_enabled ? 'active' : 'disabled' %>">
+      <%= paymentSettings?.test_payment_enabled ? 'Тестовая оплата включена' : 'Реальная оплата' %>
+    </span>
+  </p>
+  <form action="<%= adminBase %>/payment-settings/toggle-test" method="get">
+    <input
+      type="hidden"
+      name="enabled"
+      value="<%= paymentSettings?.test_payment_enabled ? 'false' : 'true' %>"
+    />
+    <button class="<%= paymentSettings?.test_payment_enabled ? 'danger' : '' %>" type="submit">
+      <%= paymentSettings?.test_payment_enabled ? 'Выключить тестовую оплату' : 'Включить тестовую оплату' %>
+    </button>
+  </form>
+</section>
+
+<section class="card">
   <h1>Платежи</h1>
   <% if (success) { %>
     <div class="alert info"><%= success %></div>
