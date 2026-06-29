@@ -133,6 +133,9 @@ class Monitoring(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     bot_id: Mapped[int | None] = mapped_column(ForeignKey("telegram_bots.id", ondelete="SET NULL"), nullable=True, index=True)
+    subscription_id: Mapped[int | None] = mapped_column(
+        ForeignKey("user_subscriptions.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     url: Mapped[str] = mapped_column(Text)
     title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     keywords_white: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -158,6 +161,7 @@ class Monitoring(Base):
 
     user = relationship("User")
     bot = relationship("TelegramBot")
+    subscription = relationship("UserSubscription")
 
 
 class MonitoringItem(Base):

@@ -2,7 +2,7 @@ from datetime import datetime
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from sqlalchemy import and_, desc, func, select, update
+from sqlalchemy import and_, desc, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -172,11 +172,32 @@ def _release_stale_monitoring_slots(db: Session, user_id: int, allowed_slots: in
         .order_by(Monitoring.is_active.desc(), Monitoring.id.desc())
     ).all()
 
+    now = now_utc()
+    released = 0
+    for mon in assigned:
+        if mon.subscription_id is None or not mon.subscription:
+            continue
+        subscription_ends_at = mon.subscription.ends_at
+        comparison_now = now
+        if subscription_ends_at.tzinfo is None and comparison_now.tzinfo is not None:
+            comparison_now = comparison_now.replace(tzinfo=None)
+        elif subscription_ends_at.tzinfo is not None and comparison_now.tzinfo is None:
+            comparison_now = comparison_now.replace(tzinfo=subscription_ends_at.tzinfo)
+        if subscription_ends_at > comparison_now:
+            continue
+        mon.is_active = False
+        mon.bot_id = None
+        mon.notify_since_at = None
+        released += 1
+
+    assigned = [mon for mon in assigned if mon.bot_id is not None]
+
     if len(assigned) <= allowed:
-        return 0
+        if released:
+            db.commit()
+        return released
 
     keep_ids = {mon.id for mon in assigned[:allowed]}
-    released = 0
     for mon in assigned:
         if mon.id in keep_ids:
             continue
@@ -256,7 +277,13 @@ def _activate_onboarding_trial(db: Session, user: User) -> UserSubscription | No
         is_trial=True,
     )
     current_total_slots = db.scalar(select(func.count(Monitoring.id)).where(Monitoring.user_id == user.id)) or 0
-    ensure_subscription_monitoring_slots(db, user.id, current_total_slots + 1)
+    ensure_subscription_monitoring_slots(
+        db,
+        user.id,
+        current_total_slots + 1,
+        subscription_id=subscription.id,
+    )
+    db.commit()
     send_subscription_assigned_bot_message(
         db,
         user,
@@ -393,8 +420,13 @@ def _build_purchase_response(
     )
 
 
-def _apply_monitoring_purchase_payload(db: Session, user: User, payload: dict, target_total_slots: int) -> None:
-    ensure_subscription_monitoring_slots(db, user.id, target_total_slots)
+def _apply_monitoring_purchase_payload(
+    db: Session,
+    user: User,
+    payload: dict,
+    target_total_slots: int,
+    subscription: UserSubscription,
+) -> None:
 
     monitoring_id = _safe_int(payload.get("monitoring_id"), 0)
     target_monitoring = None
@@ -402,6 +434,25 @@ def _apply_monitoring_purchase_payload(db: Session, user: User, payload: dict, t
         target_monitoring = db.scalar(
             select(Monitoring).where(and_(Monitoring.id == monitoring_id, Monitoring.user_id == user.id))
         )
+
+    if target_monitoring and target_monitoring.bot_id is None:
+        bot = get_available_bot_for_user(db, user.id)
+        if not bot:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Нет доступного бота для продления подписки. Добавьте ботов в админке.",
+            )
+        target_monitoring.bot_id = bot.id
+
+    if target_monitoring:
+        target_monitoring.subscription_id = subscription.id
+
+    ensure_subscription_monitoring_slots(
+        db,
+        user.id,
+        target_total_slots,
+        subscription_id=subscription.id,
+    )
 
     configured_monitoring = target_monitoring
     if not configured_monitoring:
@@ -438,7 +489,10 @@ def _finalize_subscription_payment(
     payment: Payment,
 ) -> UserSubscription:
     locked_payment = db.scalar(
-        select(Payment).where(Payment.id == payment.id).with_for_update()
+        select(Payment)
+        .where(Payment.id == payment.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
     )
     if locked_payment:
         payment = locked_payment
@@ -473,8 +527,13 @@ def _finalize_subscription_payment(
     subscription = None
     monitoring_id = _safe_int(payload.get("monitoring_id"), 0)
     if monitoring_id > 0:
-        subscription_info = get_monitoring_subscription_map(db, user.id).get(monitoring_id) or {}
-        renewal_subscription_id = _safe_int(subscription_info.get("subscription_id"), 0)
+        target_monitoring = db.scalar(
+            select(Monitoring).where(and_(Monitoring.id == monitoring_id, Monitoring.user_id == user.id))
+        )
+        renewal_subscription_id = _safe_int(target_monitoring.subscription_id if target_monitoring else None, 0)
+        if renewal_subscription_id <= 0:
+            subscription_info = get_monitoring_subscription_map(db, user.id).get(monitoring_id) or {}
+            renewal_subscription_id = _safe_int(subscription_info.get("subscription_id"), 0)
         if renewal_subscription_id > 0:
             subscription = db.get(UserSubscription, renewal_subscription_id)
 
@@ -506,7 +565,7 @@ def _finalize_subscription_payment(
         )
         db.add(subscription)
         db.flush()
-    _apply_monitoring_purchase_payload(db, user, payload, target_total_slots)
+    _apply_monitoring_purchase_payload(db, user, payload, target_total_slots, subscription)
 
     reward = reward_referrer_for_payment(db, user, amount_to_pay)
     promo_code_id = _safe_int(payload.get("promo_code_id"), 0)
@@ -824,15 +883,12 @@ def list_monitorings(
     user = auth_user
     allowed_slots = get_active_links_limit(db, user.id)
     _release_stale_monitoring_slots(db, user.id, allowed_slots)
-    if allowed_slots <= 0:
-        return []
-
     monitorings = db.scalars(
         select(Monitoring)
         .where(
             and_(
                 Monitoring.user_id == user.id,
-                Monitoring.bot_id.is_not(None),
+                or_(Monitoring.bot_id.is_not(None), Monitoring.subscription_id.is_not(None)),
             )
         )
         .order_by(Monitoring.id.desc())
@@ -1086,7 +1142,7 @@ def purchase_subscription(
     current_allowed_slots = get_active_links_limit(db, user.id)
     _release_stale_monitoring_slots(db, user.id, current_allowed_slots)
 
-    slots_to_add = 0 if target_monitoring else 1
+    slots_to_add = 0 if target_monitoring and target_monitoring.bot_id is not None else 1
     _require_free_bots_for_new_slots(db, user.id, slots_to_add)
 
     current_total_slots = db.scalar(

@@ -58,6 +58,24 @@ export function formatDateTime(value) {
   return new Date(value).toLocaleString('ru-RU', { timeZone: MOSCOW_TZ })
 }
 
+export function monitoringSubscriptionLabel(monitoring, { detailed = false } = {}) {
+  const endsAt = monitoring?.subscription_ends_at
+  if (!endsAt) return 'Подписка не активна'
+
+  const endsAtTs = new Date(endsAt).getTime()
+  const expired = Number.isFinite(endsAtTs) && endsAtTs <= Date.now()
+  const formatted = formatDateTime(endsAt)
+  if (monitoring?.subscription_is_trial) {
+    return expired ? `Пробный период завершён: ${formatted}` : `Пробный период до: ${formatted}`
+  }
+
+  const planSuffix =
+    detailed && monitoring?.subscription_plan_name ? ` · ${monitoring.subscription_plan_name}` : ''
+  return expired
+    ? `Подписка истекла: ${formatted}${planSuffix}`
+    : `${detailed ? 'Подписка действует до' : 'Подписка до'}: ${formatted}${planSuffix}`
+}
+
 export function buildSubscriptionBotLink(bot) {
   const base = bot?.bot_link
   if (!base) return null

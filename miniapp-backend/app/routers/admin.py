@@ -845,7 +845,13 @@ def activate_subscription(payload: ActivateSubscriptionRequest, db: Session = De
             )
         )
     ) or 0
-    slots_created = ensure_subscription_monitoring_slots(db, user.id, current_total_slots + 1)
+    slots_created = ensure_subscription_monitoring_slots(
+        db,
+        user.id,
+        current_total_slots + 1,
+        subscription_id=new_sub.id,
+    )
+    db.commit()
     user_notified = send_subscription_assigned_bot_message(
         db,
         user,

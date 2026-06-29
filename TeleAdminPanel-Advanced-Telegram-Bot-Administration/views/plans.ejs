@@ -2,7 +2,7 @@
 
 <section class="card">
   <h1>Тарифы</h1>
-  <p class="muted">Создавайте и редактируйте тарифы: формат, срок, цена и лимит мониторингов.</p>
+  <p class="muted">Создавайте и редактируйте тарифы: формат, срок и цена.</p>
 
   <% if (success) { %>
     <div class="alert info"><%= success %></div>
@@ -20,7 +20,6 @@
     <input name="duration_label" placeholder="Название срока (например: Неделя)" required />
     <input name="duration_days" type="number" min="1" placeholder="Срок в днях" required />
     <input name="price_rub" type="number" min="0" placeholder="Стоимость, ₽" required />
-    <input name="links_limit" type="number" min="1" value="1" placeholder="Лимит мониторингов" required />
     <input name="description" placeholder="Описание (опционально)" />
     <label>
       <input type="checkbox" name="is_active" checked /> Активен
@@ -56,7 +55,7 @@
           </td>
           <td>
             <span class="muted">
-              <%= plan.price_rub %> ₽ · <%= plan.duration_days %> дней · лимит <%= plan.links_limit %>
+              <%= plan.price_rub %> ₽ · <%= plan.duration_days %> дней
             </span><br />
             <span class="badge <%= plan.is_active ? 'active' : 'disabled' %>"><%= plan.is_active ? 'active' : 'disabled' %></span>
           </td>
@@ -69,7 +68,6 @@
               <input name="duration_label" value="<%= durationLabel %>" required />
               <input name="duration_days" type="number" min="1" value="<%= plan.duration_days %>" required />
               <input name="price_rub" type="number" min="0" value="<%= plan.price_rub %>" required />
-              <input name="links_limit" type="number" min="1" value="<%= plan.links_limit %>" required />
               <input name="description" value="<%= plan.description || '' %>" placeholder="Описание (опционально)" />
               <label>
                 <input type="checkbox" name="is_active" <%= plan.is_active ? 'checked' : '' %> /> Активен

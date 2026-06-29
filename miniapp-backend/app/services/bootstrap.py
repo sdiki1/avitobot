@@ -111,6 +111,7 @@ def init_db() -> None:
         conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_users_saved_promo_code_id ON users (saved_promo_code_id)")
 
         conn.exec_driver_sql("ALTER TABLE monitorings ADD COLUMN IF NOT EXISTS bot_id INTEGER")
+        conn.exec_driver_sql("ALTER TABLE monitorings ADD COLUMN IF NOT EXISTS subscription_id INTEGER")
         conn.exec_driver_sql("ALTER TABLE monitorings ADD COLUMN IF NOT EXISTS link_configured BOOLEAN DEFAULT FALSE")
         conn.exec_driver_sql("ALTER TABLE monitorings ADD COLUMN IF NOT EXISTS include_photo BOOLEAN DEFAULT TRUE")
         conn.exec_driver_sql("ALTER TABLE monitorings ADD COLUMN IF NOT EXISTS include_description BOOLEAN DEFAULT TRUE")
@@ -119,6 +120,7 @@ def init_db() -> None:
         conn.exec_driver_sql("ALTER TABLE monitorings ADD COLUMN IF NOT EXISTS detect_repost BOOLEAN DEFAULT TRUE")
         conn.exec_driver_sql("ALTER TABLE monitorings ADD COLUMN IF NOT EXISTS notify_since_at TIMESTAMP WITH TIME ZONE")
         conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_monitorings_bot_id ON monitorings (bot_id)")
+        conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_monitorings_subscription_id ON monitorings (subscription_id)")
         conn.exec_driver_sql(
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_monitorings_user_bot "
             "ON monitorings (user_id, bot_id) WHERE bot_id IS NOT NULL"
@@ -145,6 +147,27 @@ def init_db() -> None:
 
         conn.exec_driver_sql("ALTER TABLE user_subscriptions ADD COLUMN IF NOT EXISTS is_trial BOOLEAN DEFAULT FALSE")
         conn.exec_driver_sql("UPDATE user_subscriptions SET is_trial = FALSE WHERE is_trial IS NULL")
+        # Сохраняем существующее неявное распределение подписок по мониторингам.
+        # После этого продление привязано к конкретному мониторингу и не зависит
+        # от сортировки сроков окончания других подписок пользователя.
+        conn.exec_driver_sql(
+            "WITH subscription_slots AS ("
+            " SELECT us.id AS subscription_id, us.user_id,"
+            " ROW_NUMBER() OVER (PARTITION BY us.user_id ORDER BY us.ends_at DESC, us.id DESC) AS slot_number"
+            " FROM user_subscriptions us"
+            " JOIN tariff_plans tp ON tp.id = us.plan_id"
+            " CROSS JOIN LATERAL generate_series(1, GREATEST(COALESCE(tp.links_limit, 0), 0))"
+            " WHERE us.ends_at > NOW()"
+            "), monitoring_slots AS ("
+            " SELECT id AS monitoring_id, user_id,"
+            " ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY id ASC) AS slot_number"
+            " FROM monitorings WHERE bot_id IS NOT NULL AND subscription_id IS NULL"
+            ")"
+            " UPDATE monitorings m SET subscription_id = ss.subscription_id"
+            " FROM monitoring_slots ms"
+            " JOIN subscription_slots ss ON ss.user_id = ms.user_id AND ss.slot_number = ms.slot_number"
+            " WHERE m.id = ms.monitoring_id AND m.subscription_id IS NULL"
+        )
 
         conn.exec_driver_sql("ALTER TABLE tariff_plans ADD COLUMN IF NOT EXISTS plan_format VARCHAR(32)")
         conn.exec_driver_sql("ALTER TABLE tariff_plans ADD COLUMN IF NOT EXISTS duration_label VARCHAR(255)")

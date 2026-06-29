@@ -279,11 +279,10 @@ def get_active_subscription_query(user_id: int) -> Select[tuple[UserSubscription
 
 
 def get_monitoring_subscription_map(db: Session, user_id: int) -> dict[int, dict]:
-    """Распределяет активные подписки по слотам ботов пользователя.
+    """Возвращает подписку, явно назначенную каждому мониторингу.
 
-    Каждая подписка раскладывается в links_limit слотов, слоты сортируются по
-    сроку окончания подписки (по убыванию — самые «свежие» вперед). Мониторинги
-    с ботами сортируются по id asc и сопоставляются 1-к-1 со слотами.
+    Для старых записей без subscription_id сохраняется совместимость с прежним
+    распределением по слотам до выполнения миграции при следующем запуске.
     """
     subs = db.scalars(
         select(UserSubscription)
@@ -291,27 +290,42 @@ def get_monitoring_subscription_map(db: Session, user_id: int) -> dict[int, dict
         .order_by(UserSubscription.ends_at.desc())
     ).all()
 
-    slots: list[dict] = []
-    for sub in subs:
-        limit = int(sub.plan.links_limit) if sub.plan and sub.plan.links_limit else 0
-        for _ in range(limit):
-            slots.append(
-                {
-                    "subscription_id": sub.id,
-                    "subscription_ends_at": sub.ends_at,
-                    "subscription_plan_name": sub.plan.name if sub.plan else "Без тарифа",
-                    "subscription_is_trial": bool(sub.is_trial),
-                }
-            )
-
     monitorings = db.scalars(
         select(Monitoring)
-        .where(and_(Monitoring.user_id == user_id, Monitoring.bot_id.is_not(None)))
+        .where(
+            and_(
+                Monitoring.user_id == user_id,
+                or_(Monitoring.bot_id.is_not(None), Monitoring.subscription_id.is_not(None)),
+            )
+        )
         .order_by(Monitoring.id.asc())
     ).all()
 
+    def subscription_info(sub: UserSubscription) -> dict:
+        return {
+            "subscription_id": sub.id,
+            "subscription_ends_at": sub.ends_at,
+            "subscription_plan_name": sub.plan.name if sub.plan else "Без тарифа",
+            "subscription_is_trial": bool(sub.is_trial),
+        }
+
     mapping: dict[int, dict] = {}
-    for mon, slot in zip(monitorings, slots):
+    assigned_counts: dict[int, int] = {}
+    legacy_monitorings: list[Monitoring] = []
+    for mon in monitorings:
+        if mon.subscription:
+            mapping[int(mon.id)] = subscription_info(mon.subscription)
+            assigned_counts[int(mon.subscription.id)] = assigned_counts.get(int(mon.subscription.id), 0) + 1
+        elif mon.bot_id is not None:
+            legacy_monitorings.append(mon)
+
+    slots: list[dict] = []
+    for sub in subs:
+        limit = int(sub.plan.links_limit) if sub.plan and sub.plan.links_limit else 0
+        remaining = max(0, limit - assigned_counts.get(int(sub.id), 0))
+        slots.extend(subscription_info(sub) for _ in range(remaining))
+
+    for mon, slot in zip(legacy_monitorings, slots):
         mapping[int(mon.id)] = slot
     return mapping
 
@@ -385,7 +399,13 @@ def get_available_bot_for_user(db: Session, user_id: int) -> TelegramBot | None:
     return None
 
 
-def ensure_subscription_monitoring_slots(db: Session, user_id: int, links_limit: int) -> int:
+def ensure_subscription_monitoring_slots(
+    db: Session,
+    user_id: int,
+    links_limit: int,
+    *,
+    subscription_id: int | None = None,
+) -> int:
     target_slots = max(0, int(links_limit))
     if target_slots == 0:
         return 0
@@ -410,6 +430,7 @@ def ensure_subscription_monitoring_slots(db: Session, user_id: int, links_limit:
             Monitoring(
                 user_id=user_id,
                 bot_id=bot.id,
+                subscription_id=subscription_id,
                 url="https://www.avito.ru/",
                 title=f"Мониторинг #{slot_index + 1}",
                 keywords_white="",
@@ -425,7 +446,7 @@ def ensure_subscription_monitoring_slots(db: Session, user_id: int, links_limit:
         created += 1
 
     if created:
-        db.commit()
+        db.flush()
     return created
 
 
@@ -928,6 +949,11 @@ def send_subscription_assigned_bot_message(
         .where(
             and_(
                 Monitoring.user_id == user.id,
+                *(
+                    [Monitoring.subscription_id == subscription.id]
+                    if subscription is not None
+                    else []
+                ),
                 TelegramBot.is_primary.is_(False),
                 TelegramBot.is_active.is_(True),
             )

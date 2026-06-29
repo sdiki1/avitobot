@@ -1,4 +1,4 @@
-import { buildSubscriptionBotLink, formatDateTime, PARAM_OPTIONS } from '../appShared.jsx'
+import { buildSubscriptionBotLink, monitoringSubscriptionLabel, PARAM_OPTIONS } from '../appShared.jsx'
 
 export default function SubscriptionDetailScreen({
   selectedMonitoring,
@@ -27,15 +27,7 @@ export default function SubscriptionDetailScreen({
         <>
           <h1 className="screen-title">{detailDraft.title || selectedMonitoring.title || 'Подписка'}</h1>
 
-          <p className="hint-text">
-            {selectedMonitoring.subscription_ends_at
-              ? selectedMonitoring.subscription_is_trial
-                ? `Пробный период до: ${formatDateTime(selectedMonitoring.subscription_ends_at)}`
-                : `Подписка действует до: ${formatDateTime(selectedMonitoring.subscription_ends_at)}${
-                    selectedMonitoring.subscription_plan_name ? ` · ${selectedMonitoring.subscription_plan_name}` : ''
-                  }`
-              : 'Подписка не активна'}
-          </p>
+          <p className="hint-text">{monitoringSubscriptionLabel(selectedMonitoring, { detailed: true })}</p>
 
           <h2 className="section-title">Настройки подписки</h2>
           <input

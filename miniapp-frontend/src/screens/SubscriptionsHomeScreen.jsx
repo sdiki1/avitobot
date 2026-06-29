@@ -1,4 +1,4 @@
-import { botShortName, formatDateTime, IconChevron } from '../appShared.jsx'
+import { botShortName, IconChevron, monitoringSubscriptionLabel } from '../appShared.jsx'
 
 export default function SubscriptionsHomeScreen({
   miniappContent,
@@ -35,13 +35,7 @@ export default function SubscriptionsHomeScreen({
                 {botShortName(monitoring.bot)} • {monitoring.is_active ? 'в работе' : 'остановлен'} •{' '}
                 {monitoring.link_configured ? 'ссылка задана' : 'ссылка не задана'}
               </span>
-              <span>
-                {monitoring.subscription_ends_at
-                  ? monitoring.subscription_is_trial
-                    ? `Пробный период до: ${formatDateTime(monitoring.subscription_ends_at)}`
-                    : `Подписка до: ${formatDateTime(monitoring.subscription_ends_at)}`
-                  : 'Подписка не активна'}
-              </span>
+              <span>{monitoringSubscriptionLabel(monitoring)}</span>
             </span>
 
             <span className="subscription-chevron">
