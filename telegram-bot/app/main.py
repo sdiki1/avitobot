@@ -988,15 +988,41 @@ def build_router(bot_id: int, backend: BackendAPI, *, is_primary: bool = False) 
         tg_user = message.from_user
         start_arg = _extract_start_arg(message.text)
         referral_code = _extract_referral_code(start_arg)
-        auth = await backend.auth_user(
-            telegram_id=tg_user.id,
-            username=tg_user.username,
-            full_name=tg_user.full_name,
-            referral_code=referral_code,
-        )
+        try:
+            auth = await backend.auth_user(
+                telegram_id=tg_user.id,
+                username=tg_user.username,
+                full_name=tg_user.full_name,
+                referral_code=referral_code,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to authorize /start user={} in secondary bot_id={}: {}",
+                tg_user.id,
+                bot_id,
+                exc,
+            )
+            await message.answer(
+                "Бот запущен, но сервис временно недоступен. Попробуйте команду /start ещё раз через минуту.",
+                reply_markup=monitoring_actions_keyboard(tg_user.id),
+            )
+            return
         if auth.get("is_new"):
             await _send_instruction(message)
-        status_code, payload = await backend.current_monitoring(bot_id=bot_id, telegram_id=tg_user.id)
+        try:
+            status_code, payload = await backend.current_monitoring(bot_id=bot_id, telegram_id=tg_user.id)
+        except Exception as exc:
+            logger.warning(
+                "Failed to load monitoring on /start user={} in secondary bot_id={}: {}",
+                tg_user.id,
+                bot_id,
+                exc,
+            )
+            await message.answer(
+                "Бот запущен, но сейчас не удалось загрузить мониторинг. Попробуйте /start ещё раз через минуту.",
+                reply_markup=monitoring_actions_keyboard(tg_user.id),
+            )
+            return
 
         if start_arg == "subscription":
             try:
@@ -1485,6 +1511,7 @@ class MultiBotManager:
             else:
                 await bot.set_my_commands(
                     [
+                        BotCommand(command="start", description="Открыть управление мониторингом"),
                         BotCommand(command="start_monitoring", description="Запустить мониторинг"),
                         BotCommand(command="stop_monitoring", description="Остановить мониторинг"),
                         BotCommand(command="change_link", description="Поменять ссылку"),
