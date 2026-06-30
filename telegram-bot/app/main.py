@@ -881,7 +881,25 @@ def build_router(bot_id: int, backend: BackendAPI, *, is_primary: bool = False) 
         return router
 
     async def _show_status(message: Message) -> None:
-        status_code, payload = await backend.current_monitoring(bot_id=bot_id, telegram_id=message.from_user.id)
+        try:
+            status_code, payload = await backend.current_monitoring(
+                bot_id=bot_id,
+                telegram_id=message.from_user.id,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to load monitoring status user={} in secondary bot_id={}: {}",
+                message.from_user.id,
+                bot_id,
+                exc,
+            )
+            await _answer_with_static_photo(
+                message,
+                "Не удалось получить информацию о мониторинге. Попробуйте ещё раз позже.",
+                photo_key="error",
+                reply_markup=monitoring_actions_keyboard(message.from_user.id),
+            )
+            return
         if status_code == 200:
             await _answer_with_static_photo(
                 message,
@@ -1002,13 +1020,14 @@ def build_router(bot_id: int, backend: BackendAPI, *, is_primary: bool = False) 
                 bot_id,
                 exc,
             )
-            await message.answer(
-                "Бот запущен, но сервис временно недоступен. Попробуйте команду /start ещё раз через минуту.",
-                reply_markup=monitoring_actions_keyboard(tg_user.id),
-            )
-            return
+            auth = {}
         if auth.get("is_new"):
             await _send_instruction(message)
+
+        if start_arg != "subscription":
+            await _show_status(message)
+            return
+
         try:
             status_code, payload = await backend.current_monitoring(bot_id=bot_id, telegram_id=tg_user.id)
         except Exception as exc:
@@ -1018,10 +1037,7 @@ def build_router(bot_id: int, backend: BackendAPI, *, is_primary: bool = False) 
                 bot_id,
                 exc,
             )
-            await message.answer(
-                "Бот запущен, но сейчас не удалось загрузить мониторинг. Попробуйте /start ещё раз через минуту.",
-                reply_markup=monitoring_actions_keyboard(tg_user.id),
-            )
+            await _show_status(message)
             return
 
         if start_arg == "subscription":
@@ -1073,26 +1089,6 @@ def build_router(bot_id: int, backend: BackendAPI, *, is_primary: bool = False) 
             )
             await message.answer(text, reply_markup=monitoring_actions_keyboard(tg_user.id))
             return
-
-        if status_code == 200:
-            text = (
-                "Этот бот привязан к вашему мониторингу.\n\n"
-                f"{_format_monitoring_status(payload)}\n\n"
-                "Управляйте мониторингом кнопками ниже."
-            )
-        elif status_code == 404:
-            text = (
-                "Этот бот пока не назначен вам.\n"
-                "Купите мониторинг в miniapp и получите привязку автоматически."
-            )
-        else:
-            text = f"Не удалось получить мониторинг: {_extract_error(payload)}"
-        await _answer_with_static_photo(
-            message,
-            text,
-            photo_key="error" if text.startswith("Не удалось") else None,
-            reply_markup=monitoring_actions_keyboard(tg_user.id),
-        )
 
     @router.message(Command("plans"))
     async def cmd_plans(message: Message) -> None:
